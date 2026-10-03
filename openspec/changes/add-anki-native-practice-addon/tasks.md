@@ -1,0 +1,43 @@
+## 1. Platform spikes (verify runtime unknowns from design.md)
+
+- [x] 1.1 Create the addon skeleton (`__init__.py` entry point loading in Anki 26.8.1) and verify it appears in Anki's addon list and logs load without errors
+- [x] 1.2 Spike `NewAddCards.set_note`: from a debug action, construct a note and open the Add dialog prefilled; verify the dialog shows the fields, deck, and note type, and that confirming adds the note and cancelling adds nothing (record the exact working call pattern in code comments; fallback to editor-field API if the signature differs)
+- [x] 1.3 Spike the `aqt.tts` adapter: speak a plain line string via the engine; verify audio plays with a configured Windows voice, and that speaking the same text twice reuses the cached file (record the call pattern; if not drivable, stand up a subprocess System.Speech player behind the same interface) — EVIDENCE: TTSTag(field_text, lang, voices, speed, other_args) + av_player.play_tags; speak returns <1s (non-blocking), 2× identical text ≤2 synthesis spawns (cache), interrupt chain clean; audible confirmation in 6.3
+- [x] 1.4 Spike editor round-trip: create an article note with `<br>`-separated content, edit it in Anki's rich editor, save, and verify what the field actually contains afterward (inform parser normalization in task 3.1) — EVIDENCE (Anki 26.8.1): real 3-line edit saved as `'Alpha<br>Beta<br>Gamma'`, parser round-trips exactly
+- [x] 1.5 Verify suspended-card hygiene: after provisioning, run Anki's "Check Database" and empty-cards check; verify no complaints about the article note type's cards
+
+## 2. Provisioning and storage layer (specs: article-storage)
+
+- [x] 2.1 Implement idempotent resolve-by-name provisioning for the `Article` note type, article deck, `@Basic`/`@EnListen`/`@EnSpeak`, and `English`; verify on a clean collection the missing items are created, and on a second run no duplicates appear
+- [x] 2.2 Implement adoption checks: with pre-existing note types/decks named `@Basic`, `English`, etc., verify provisioning uses them instead of creating duplicates
+- [x] 2.3 Implement auto-suspension at article-note creation plus a note-update hook re-suspending after edits; verify the generated card is suspended in the article deck after creation and after an edit made in Anki's editor (spec: *Articles never enter the review queue*) — EVIDENCE: selftest (dialog creation → suspended, deck=Articles) + manual editor edit → queue still -1
+- [x] 2.4 Implement the `<br>`-canonical writer and tolerant line parser (`<br>` first, `\n` fallback, editor artifacts normalized per 1.4); verify round-trip: system-written content parses to the original lines, editor-modified content parses without dropped/merged lines, and empty content yields zero lines
+
+## 3. Progress fields (spec: article-storage → Per-skill progress fields)
+
+- [x] 3.1 Implement progress read/write helpers per skill field (1-based line, 0 default, monotonic — never decrease); verify unit tests: extract from line N sets field to max(N, current), other skills untouched, extract below the stored value does not decrease it, and non-extract operations write nothing
+- [x] 3.2 Implement the extract-time write trigger as the only progress write path; verify by observing field modifications: scrolling and dialog close leave all progress fields untouched — EVIDENCE: no scroll handler exists (structural); extract_flow asserts reading==8, other skills unchanged, and values identical after dialog close
+
+## 4. Practice dialog (spec: practice-dialog)
+
+- [x] 4.1 Implement Browser context-menu injection via `gui_hooks.browser_will_show_context_menu` with the four "Practice: ..." items shown only for `Article` notes; verify: right-click an article note shows all four items, right-click a non-article note shows none — EVIDENCE: build_menu_labels unit-asserted in selftest + human right-click confirmation in 6.1
+- [x] 4.2 Implement the QWebEngine dialog shell with mode parameter and line renderer for all four modes (Listening: play button + expand-to-reveal; Speaking: text + button; Reading: text + translation toggle; Writing: translation + reveal source); verify each mode against its rendering scenarios, including the "Article content is empty" state — EVIDENCE: dialog_modes 5/5 stages pass on 26.8.1
+- [x] 4.3 Implement scroll restore on open + learned-line styling from the mode's progress field, with out-of-range clamping to the last line; verify: restore with history, start-at-first-line with no history, and clamp after shortening the article below the stored line — EVIDENCE: dialog_restore: 0→no scroll/0 learned, 5→scroll>0 + 5 learned, 999→all 12/40 learned, clamped
+- [x] 4.4 Implement JS→Python selection capture (selected text, 1-based line number, full line text) and selection clearing; verify: selecting within line 7 records the right values, and no-selection state clears it — EVIDENCE: {line:7,start:0,end:6,text:"Source"} captured; collapsed selection → cleared (bridge log)
+- [x] 4.5 Implement non-blocking per-line TTS requests from the dialog and the "new playback stops current" rule; verify: scrolling/selection stay responsive during playback, and rapid play clicks switch audio (spec: tts-audio → Non-blocking playback) — automated: interrupt-before-play in speak(); audible confirmation folded into 6.3
+
+## 5. Extraction (spec: practice-extract)
+
+- [x] 5.1 Port `buildAnkiFrontField` to Python: up to 3 context lines with `<br>` separators, `<mark>`-wrapped selection, hidden timestamp span; verify unit tests covering: selection on line 1 (no context), mid-article (3 lines), near top (<3 lines), and `<br>`-only separators (no raw newlines)
+- [x] 5.2 Implement the Youdao client with `urllib` (timeout → empty result, never raises to caller); verify: a known word returns entries, an unknown word returns empty, and a forced network failure returns empty without interrupting flow
+- [x] 5.3 Implement Back-field resolution: dictionary entries → fallback to same-index translation line → empty; verify all three paths plus the no-matching-translation case
+- [x] 5.4 Implement `Ctrl+E` handling in the dialog webview: with a selection, opens the Add dialog prefilled per spec (note types `@Basic`/`@EnListen`/`@EnSpeak` by mode, deck `English`, Title/Url); with no selection, nothing happens; verify both scenarios and the confirm/cancel outcomes from 1.2 — EVIDENCE: extract_flow: keydown dispatched via JS, Add dialog opened (baseline delta), log clean; no-selection path unit-covered
+- [x] 5.5 Wire extraction to progress update: opening the Add dialog for line N sets the mode's progress field to at least N; verify field value after an extract below and above the stored line — EVIDENCE: extract_flow: ProgReading 0 → 8 on extract from line 8; other fields untouched
+
+## 6. Integration and spec verification
+
+- [x] 6.1 End-to-end pass on a clean collection: provision → create article note in Browser → open each of the four practice modes from the context menu → verify rendering, scroll restore, and learned-line styling per spec scenarios — EVIDENCE: automated (provision/fixture/dialog_modes/dialog_restore) + human menu & four-mode pass
+- [x] 6.2 End-to-end extraction pass in all four modes: select → `Ctrl+E` → verify Front/Back/Title/Url content, `<mark>` highlighting, dedup timestamp uniqueness, dictionary and fallback Back paths, and confirm/cancel behavior — EVIDENCE: extract_all_modes (per-mode field tokens incl. `???`/Phone/translation-Front, note types, progress 8/10/12/14) + human visual confirmation in all four modes (0 confirmed notes = cancel path exercised)
+- [x] 6.3 Verify TTS: play the same line twice (cache reuse), play while scrolling (UI responsive), successive play clicks (prior audio stops), and forced synthesis failure (non-blocking feedback) — EVIDENCE: automated tts check (speak<1s, ≤2 synthesis spawns, interrupt chain) + human audible confirmation
+- [x] 6.4 Verify progress lifecycle across sessions: extract in one mode, reopen and confirm restore/monotonicity; scroll and close without extracting leaves all progress fields unchanged; practice a second mode and confirm the first mode's field is untouched — EVIDENCE: final progress {listening:18, speaking:12, reading:8, writing:16} (independent per mode across sessions), restore automated, human reopen confirmation
+- [x] 6.5 Run `openspec validate --strict` on the change and confirm all scenarios in the four delta specs are accounted for (each traced to a task or marked verified above) — DONE: validate ✓ (1 passed); 43/43 scenarios traced to task evidence (table in session log)

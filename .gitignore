@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Anki runtime artifacts written into the addon folder during dev testing
+language_study_anki/meta.json
+
+# OpenSpec
+openspec/changes/*/.openspec.yaml.bak
+
+# Editor / OS
+.vscode/
+.DS_Store
+.scratch-anki/
