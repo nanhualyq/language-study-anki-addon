@@ -296,8 +296,20 @@ function computeSel(){
     end = b.toString().length;
   }
   if (end <= start) return null;
-  const text = area.textContent.substring(start, end);
-  if (!text) return null;
+  let text = area.textContent.substring(start, end);
+  /* Chromium's word-granularity (double-click) selection swallows the space
+     AFTER a word ("brown " → offsets 10..16, verified); Flutter's word
+     boundary selects the word only. Shrink the RANGE itself — not just the
+     text — so start/end stay consistent with the stored text and the <mark>
+     highlight. A selection that is all whitespace collapses to null
+     (Flutter parity: practice_line_item.dart `trim().isEmpty` guard). */
+  let i = 0, j = text.length;
+  while (i < j && /\s/.test(text.charAt(i))) i += 1;
+  while (j > i && /\s/.test(text.charAt(j - 1))) j -= 1;
+  if (j <= i) return null;
+  start += i;
+  end = start + (j - i);
+  text = text.substring(i, j);
   return {line: +row.dataset.line, start: start, end: end, text: text};
 }
 document.addEventListener('selectionchange', function(){
