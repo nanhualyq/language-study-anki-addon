@@ -10,9 +10,11 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
 ## Features
 
 - **Articles as notes** — `Article` note type (Title / Content / Translation /
-  Url + four progress fields), dedicated deck, cards auto-suspended so articles
-  never enter the review queue. Note types and decks are auto-provisioned on
-  first use and adopted by name when they already exist.
+  Url + four progress fields), cards auto-suspended so articles never enter
+  the review queue. Note types are created on demand after a one-time
+  confirmation — the `LSA-Article` type at profile open, the extract types
+  (`@Basic`/`@EnListen`/`@EnSpeak`) and deck `English` on first extraction —
+  and existing types/decks are adopted by name when they already exist.
 - **Browser-native entry** — right-click an `Article` note →
   `Practice: Listening / Speaking / Reading / Writing`.
 - **One practice dialog, four modes** — line-based rendering, scroll restore to
@@ -53,7 +55,8 @@ backs up any previous install, and carries over its `meta.json`:
 tools/deploy-prod.sh          # add --dry-run to preview, --force if Anki is running
 ```
 
-No configuration needed — everything is provisioned on first use.
+No configuration needed — the addon asks once before creating its note
+types, and adopts any note types or decks you already have by name.
 
 ## Development
 
@@ -62,15 +65,12 @@ No configuration needed — everything is provisioned on first use.
 ```bash
 # isolated base inside the repo (.scratch-anki/, gitignored)
 tools/scratch-anki.sh            # leaves Anki running; close its window when done
-tools/scratch-anki.sh --fresh     # wipe the base first (re-create the profile, see below)
+tools/scratch-anki.sh --fresh     # wipe the base first (profile is re-created automatically, see below)
 ```
 
-If you use `--fresh`, re-create the `dev` profile headlessly (needs Anki's
-bundled Python, available as `~/anki-bin/python/bin/python3` inside WSL):
-
-```bash
-python tools/create_profile.py <repo>/.scratch-anki dev
-```
+`--fresh` restores a pristine `prefs21.db` snapshot (`tools/scratch-prefs21.db`):
+a base with prefs but no profile directory makes Anki re-create the `dev`
+profile silently on the next launch — no first-run dialog, no manual setup.
 
 Note: launch Anki with `ANKI_SINGLE_INSTANCE_KEY` set (the script does this) —
 otherwise a running production Anki swallows the launch with

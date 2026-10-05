@@ -120,7 +120,6 @@ def check_provision_and_adopt(mw, report, done) -> None:
 
         same_ids = (
             p1["article_notetype"]["id"] == p2["article_notetype"]["id"]
-            and p1["article_deck_id"] == p2["article_deck_id"]
             and p1["extract_deck_id"] == p2["extract_deck_id"]
             and all(
                 p1["extract_notetypes"][n]["id"] == p2["extract_notetypes"][n]["id"]
@@ -139,7 +138,6 @@ def check_provision_and_adopt(mw, report, done) -> None:
             "stable_across_runs": same_ids,
             "article_fields": article_fields,
             "sortf_is_title": sort_ok,
-            "article_deck_id": p1["article_deck_id"],
             "extract_deck_id": p1["extract_deck_id"],
         }
     except Exception:
@@ -162,7 +160,8 @@ def check_article_suspension(mw, report, done) -> None:
         note = col.new_note(model)
         note["Title"] = "LSA selftest article"
         note["Content"] = "Alpha<br>Beta"
-        col.add_note(note, prov["article_deck_id"])
+        # Deck is arbitrary for articles (design D6) — exercise the extract deck.
+        col.add_note(note, prov["extract_deck_id"])
         card_ids = col.card_ids_of_note(note.id)
         result["queues_after_direct_add"] = [col.get_card(c).queue for c in card_ids]
         ensure_note_suspended(note)
@@ -185,7 +184,7 @@ def check_article_suspension(mw, report, done) -> None:
         note2["Title"] = unique_title
         note2["Content"] = "Gamma<br>Delta"
         dlg = dialogs.open("AddCards", mw)
-        _set_note_any(dlg, note2, prov["article_deck_id"])
+        _set_note_any(dlg, note2, prov["extract_deck_id"])
         btn_attr, btn = _find_add_button(dlg)
         result["add_button"] = btn_attr
         if btn is None:
@@ -210,7 +209,7 @@ def check_article_suspension(mw, report, done) -> None:
                     and added
                     and bool(ids2)
                     and all(q == SUSPENDED_QUEUE for q in queues2)
-                    and decks2 == [prov["article_deck_id"]]
+                    and decks2 == [prov["extract_deck_id"]]
                 )
             except Exception:
                 report["ok"] = False

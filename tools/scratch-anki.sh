@@ -7,7 +7,8 @@
 #
 #   LSA_SELFTEST=1     map env to <base>/selftest-results.json and wait for it
 #   LSA_SELFTEST_KEEP=1  don't expect the app to exit after self-test
-#   --fresh            wipe the scratch base first (profile must be re-created)
+#   --fresh            wipe the scratch base first (profile is re-created
+#                      automatically from the prefs snapshot, see below)
 #
 # Prints the load marker, then either waits for self-test results or leaves
 # Anki running (close its window when done).
@@ -29,6 +30,14 @@ if [ "$FRESH" = 1 ]; then
   rm -rf "$BASE"
 fi
 mkdir -p "$BASE/addons21"
+
+# A base that has prefs21.db (firstRun=False, profile 'dev' registered) but
+# no profile directory makes Anki re-create the profile silently on launch —
+# no first-run dialog, no headless-python helper. This replaces the old WSL
+# create_profile flow; the pristine snapshot lives in tools/.
+if [ ! -f "$BASE/prefs21.db" ]; then
+  cp "$REPO/tools/scratch-prefs21.db" "$BASE/prefs21.db"
+fi
 
 # Fresh copy of the addon each run (Anki writes meta.json into it).
 rm -rf "$BASE/addons21/language_study_anki"

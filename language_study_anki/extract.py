@@ -16,7 +16,8 @@ import traceback
 
 from .field_builder import build_front, resolve_back
 from .progress import set_progress_at_least
-from .provisioning import MODE_NOTETYPE, provision
+from .provisioning import MODE_NOTETYPE
+from .provisioning_ui import ensure_provisioned
 
 _AUDIO_MODES = ("listening", "speaking")
 
@@ -126,7 +127,27 @@ def _open_add_dialog(dialog, sel: dict, result) -> None:
         )
     _log(dialog, f"fields {kinds} phone:{len(phone)}")
 
-    prov = provision(col)
+    prov = ensure_provisioned(
+        col,
+        dialog,
+        scope="extract",
+        context=(
+            "Extraction needs the following missing items before it can "
+            "continue:"
+        ),
+    )
+    if prov is None:
+        # Spec: declining cancels the extraction — no Add dialog, no note.
+        _log(dialog, "provision:declined")
+        from aqt.qt import QMessageBox
+
+        QMessageBox.information(
+            dialog,
+            "Language Study",
+            "Extraction cancelled: the required note types and deck were "
+            "not created.",
+        )
+        return
     model = prov["extract_notetypes"][MODE_NOTETYPE[mode]]
     note = col.new_note(model)
     _log(dialog, f"note_type:{note.note_type()['name']}")

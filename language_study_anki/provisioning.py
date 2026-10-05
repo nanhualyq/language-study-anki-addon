@@ -1,13 +1,21 @@
 """Idempotent provisioning of note types and decks.
 
 Specs: article-storage → Auto-provisioning of note types and deck.
-Decision D7: resolve-by-name first (adopt existing), create only when missing.
+Two stages, each gated by a user confirmation (the UI layer in
+``provisioning_ui`` asks before calling in):
+
+  article — ``LSA-Article`` note type, offered at profile open
+  extract — ``@Basic``/``@EnListen``/``@EnSpeak`` + deck ``English``,
+            offered at extraction time
+
+Resolve-by-name first (adopt existing), create only when missing. No
+article deck is provisioned (design D6: suspension alone keeps articles
+out of review; nothing consumes an article deck).
 """
 
 from __future__ import annotations
 
 ARTICLE_NOTE_TYPE = "LSA-Article"
-ARTICLE_DECK = "Articles"
 EXTRACT_DECK = "English"
 EXTRACT_NOTE_TYPES = ["@Basic", "@EnListen", "@EnSpeak"]
 EXTRACT_FIELD_NAMES = ["Front", "Back", "Title", "Url"]
@@ -94,16 +102,56 @@ def ensure_deck(col, name: str) -> int:
     return int(col.decks.id(name))
 
 
-def provision(col) -> dict:
-    """Provision everything, idempotently. Returns resolved objects/ids."""
-    ensure_article_notetype(col)
-    for name in EXTRACT_NOTE_TYPES:
-        ensure_extract_notetype(col, name)
+def missing_items(col, scope: str) -> dict:
+    """Names absent from the collection for one provisioning scope.
+
+    A pure read — nothing is created — so the UI layer can list exactly
+    what a confirmation would add (design D5).
+    """
+    if scope == "article":
+        note_types = [ARTICLE_NOTE_TYPE]
+        decks: list[str] = []
+    elif scope == "extract":
+        note_types = list(EXTRACT_NOTE_TYPES)
+        decks = [EXTRACT_DECK]
+    else:
+        raise ValueError(f"unknown provisioning scope: {scope!r}")
     return {
-        "article_notetype": col.models.by_name(ARTICLE_NOTE_TYPE),
-        "article_deck_id": ensure_deck(col, ARTICLE_DECK),
-        "extract_notetypes": {
-            name: col.models.by_name(name) for name in EXTRACT_NOTE_TYPES
-        },
-        "extract_deck_id": ensure_deck(col, EXTRACT_DECK),
+        "note_types": [n for n in note_types if col.models.by_name(n) is None],
+        "decks": [d for d in decks if col.decks.by_name(d) is None],
     }
+
+
+def build_confirm_message(missing: dict) -> str:
+    """The item lines of the confirmation dialog: exactly the missing note
+    types and decks, never items that already exist. Empty when nothing is."""
+    lines = []
+    if missing["note_types"]:
+        lines.append("Note types: " + ", ".join(missing["note_types"]))
+    if missing["decks"]:
+        lines.append("Decks: " + ", ".join(missing["decks"]))
+    return "\n".join(lines)
+
+
+def provision_scope(col, scope: str) -> dict:
+    """Provision one scope idempotently; returns its resolved objects/ids."""
+    if scope == "article":
+        return {"article_notetype": ensure_article_notetype(col)}
+    if scope == "extract":
+        for name in EXTRACT_NOTE_TYPES:
+            ensure_extract_notetype(col, name)
+        return {
+            "extract_notetypes": {
+                name: col.models.by_name(name) for name in EXTRACT_NOTE_TYPES
+            },
+            "extract_deck_id": ensure_deck(col, EXTRACT_DECK),
+        }
+    raise ValueError(f"unknown provisioning scope: {scope!r}")
+
+
+def provision(col) -> dict:
+    """Full provisioning (self-test entry), idempotent. Returns resolved
+    objects/ids; carries no article deck (design D6)."""
+    result = provision_scope(col, "article")
+    result.update(provision_scope(col, "extract"))
+    return result

@@ -45,7 +45,7 @@ def _ensure_long_article(col) -> int:
     note["Content"] = lines_to_field(LINES12)
     note["Translation"] = lines_to_field(TRANS12)
     note["Url"] = "https://example.com/long"
-    col.add_note(note, provisioning.ensure_deck(col, provisioning.ARTICLE_DECK))
+    col.add_note(note, provisioning.ensure_deck(col, provisioning.EXTRACT_DECK))
     ensure_note_suspended(note)
     return note.id
 
@@ -58,7 +58,7 @@ def _ensure_empty_article(col) -> int:
     note = col.new_note(model)
     note["Title"] = "LSA empty article"
     note["Content"] = ""
-    col.add_note(note, provisioning.ensure_deck(col, provisioning.ARTICLE_DECK))
+    col.add_note(note, provisioning.ensure_deck(col, provisioning.EXTRACT_DECK))
     ensure_note_suspended(note)
     return note.id
 
