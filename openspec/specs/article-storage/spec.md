@@ -7,7 +7,7 @@ Stores English articles and per-skill learning progress as native Anki notes, so
 ## Requirements
 
 ### Requirement: Article note type
-The system SHALL represent an article as an Anki note of an addon-provisioned `Article` note type with fields `Title`, `Content`, `Translation`, `Url`, `ProgListening`, `ProgSpeaking`, `ProgReading`, and `ProgWriting`. `Title` SHALL be the sort field. `Translation` and `Url` MAY be empty.
+The system SHALL represent an article as an Anki note of an addon-provisioned `LSA-Article` note type with fields `Title`, `Content`, `Translation`, `Url`, `ProgListening`, `ProgSpeaking`, `ProgReading`, and `ProgWriting`. `Title` SHALL be the sort field. `Translation` and `Url` MAY be empty.
 
 #### Scenario: Store an article with all fields
 - **WHEN** the user creates an article note with a title, English content, a Chinese translation, and a URL
@@ -18,7 +18,7 @@ The system SHALL represent an article as an Anki note of an addon-provisioned `A
 - **THEN** the `Translation` and `Url` fields are stored as empty strings
 
 ### Requirement: Auto-provisioning of note types and deck
-The system SHALL create the `Article` note type, the dedicated article deck, and the extract target note types (`@Basic`, `@EnListen`, `@EnSpeak`) and target deck (`English`) if they do not already exist, and SHALL adopt existing ones by exact name when present. Provisioning SHALL be idempotent.
+The system SHALL create the `LSA-Article` note type, the dedicated article deck, and the extract target note types (`@Basic`, `@EnListen`, `@EnSpeak`) and target deck (`English`) if they do not already exist, and SHALL adopt existing ones by exact name when present. Provisioning SHALL be idempotent.
 
 #### Scenario: First use on a clean collection
 - **WHEN** the user opens the practice entry for the first time in a collection lacking the required note types and decks
