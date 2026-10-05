@@ -46,6 +46,13 @@ folder and restart Anki:
 %APPDATA%\Anki2\addons21\language_study_anki
 ```
 
+Or run the deploy script, which copies the add-on into the default base,
+backs up any previous install, and carries over its `meta.json`:
+
+```
+tools/deploy-prod.sh          # add --dry-run to preview, --force if Anki is running
+```
+
 No configuration needed — everything is provisioned on first use.
 
 ## Development
