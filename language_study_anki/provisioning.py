@@ -6,7 +6,7 @@ Decision D7: resolve-by-name first (adopt existing), create only when missing.
 
 from __future__ import annotations
 
-ARTICLE_NOTE_TYPE = "Article"
+ARTICLE_NOTE_TYPE = "LSA-Article"
 ARTICLE_DECK = "Articles"
 EXTRACT_DECK = "English"
 EXTRACT_NOTE_TYPES = ["@Basic", "@EnListen", "@EnSpeak"]
