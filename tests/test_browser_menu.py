@@ -36,11 +36,11 @@ from language_study_anki.browser_menu import (  # noqa: E402
 )
 from language_study_anki.provisioning import ARTICLE_NOTE_TYPE  # noqa: E402
 
-MODES = ("listening", "speaking", "reading", "writing")
+MODES = ("reading", "speaking", "listening", "writing")
 BASE_LABELS = {
-    "listening": "Practice: Listening",
-    "speaking": "Practice: Speaking",
     "reading": "Practice: Reading",
+    "speaking": "Practice: Speaking",
+    "listening": "Practice: Listening",
     "writing": "Practice: Writing",
 }
 
@@ -120,9 +120,9 @@ class BuildMenuLabelsTests(unittest.TestCase):
         self.assertEqual(
             labels,
             [
-                ("listening", "Practice: Listening (0%)"),
-                ("speaking", "Practice: Speaking (0%)"),
                 ("reading", "Practice: Reading (25%)"),
+                ("speaking", "Practice: Speaking (0%)"),
+                ("listening", "Practice: Listening (0%)"),
                 ("writing", "Practice: Writing (0%)"),
             ],
         )

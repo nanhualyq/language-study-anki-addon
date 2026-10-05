@@ -7,7 +7,7 @@ Provides the in-Anki practice experience: a Browser-initiated, per-article dialo
 ## Requirements
 
 ### Requirement: Browser context-menu entry
-The system SHALL add a context-menu item group to the Browser table menu for selected article notes, offering "Practice: Listening", "Practice: Speaking", "Practice: Reading", and "Practice: Writing". The items SHALL appear only when the selection consists of article notes. Each item's label SHALL append the progress percentage of that skill for the **first selected note** — the note whose dialog opens when the item is chosen — formatted as `<base label> (<percent>%)`, e.g. `Practice: Reading (100%)`.
+The system SHALL add a context-menu item group to the Browser table menu for selected article notes, offering "Practice: Reading", "Practice: Speaking", "Practice: Listening", and "Practice: Writing", in that order. The items SHALL appear only when the selection consists of article notes. Each item's label SHALL append the progress percentage of that skill for the **first selected note** — the note whose dialog opens when the item is chosen — formatted as `<base label> (<percent>%)`, e.g. `Practice: Reading (100%)`.
 
 The percentage SHALL be computed as the note's stored progress line for that skill divided by the total number of lines in the note's `Content`, expressed as an integer percentage rounded to the nearest whole number and clamped to the range 0–100. It SHALL be `0%` when the skill has no progress or `Content` has no lines, and `100%` when the stored progress line reaches or exceeds the line count.
 

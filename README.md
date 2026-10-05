@@ -16,7 +16,7 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
   (`@Basic`/`@EnListen`/`@EnSpeak`) and deck `English` on first extraction —
   and existing types/decks are adopted by name when they already exist.
 - **Browser-native entry** — right-click an `Article` note →
-  `Practice: Listening / Speaking / Reading / Writing`.
+  `Practice: Reading / Speaking / Listening / Writing`.
 - **One practice dialog, four modes** — line-based rendering, scroll restore to
   the last extracted line, learned-line styling that updates live after an
   extract, per-line TTS (listening/speaking only).

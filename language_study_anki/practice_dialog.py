@@ -19,11 +19,11 @@ from .provisioning import ARTICLE_NOTE_TYPE
 from .suspension import ensure_note_suspended
 from .storage import field_to_lines
 
-MODES = ("listening", "speaking", "reading", "writing")
+MODES = ("reading", "speaking", "listening", "writing")
 MODE_LABELS = {
-    "listening": "Practice: Listening",
-    "speaking": "Practice: Speaking",
     "reading": "Practice: Reading",
+    "speaking": "Practice: Speaking",
+    "listening": "Practice: Listening",
     "writing": "Practice: Writing",
 }
 
