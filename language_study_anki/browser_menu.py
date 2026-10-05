@@ -9,18 +9,38 @@ from __future__ import annotations
 import traceback
 
 from .practice_dialog import MODES, MODE_LABELS
+from .progress import get_progress
 from .provisioning import ARTICLE_NOTE_TYPE
+from .storage import field_to_lines
 
-# Spec wording: the menu offers exactly these four items.
-MENU_ITEMS = [(mode, MODE_LABELS[mode]) for mode in MODES]
+
+def _progress_percent(note, skill: str) -> int:
+    """Integer percent (0-100, half-up) of the note's Content covered by
+    the skill's stored progress line. 0% for empty Content or no progress;
+    100% when progress reaches/exceeds the line count."""
+    try:
+        total = len(field_to_lines(note["Content"]))
+    except Exception:
+        return 0
+    if total <= 0:
+        return 0
+    line = get_progress(note, skill)
+    if line <= 0:
+        return 0
+    if line >= total:
+        return 100
+    return int(line * 100.0 / total + 0.5)
 
 
 def build_menu_labels(note_ids, col) -> list[tuple[str, str]] | None:
-    """Return [(mode, label), ...] when every selected note is an Article;
-    None otherwise (menu items must not appear for non-article notes)."""
+    """Return [(mode, "<label> (<pct>%)"), ...] when every selected note is
+    an Article; None otherwise (menu items must not appear for non-article
+    notes). Percentages describe the FIRST selected note — the note whose
+    dialog opens when the item is chosen."""
     if not note_ids:
         return None
-    for nid in note_ids:
+    first_note = None
+    for index, nid in enumerate(note_ids):
         try:
             note = col.get_note(nid)
         except Exception:
@@ -30,7 +50,12 @@ def build_menu_labels(note_ids, col) -> list[tuple[str, str]] | None:
                 return None
         except Exception:
             return None
-    return list(MENU_ITEMS)
+        if index == 0:
+            first_note = note
+    return [
+        (mode, f"{MODE_LABELS[mode]} ({_progress_percent(first_note, mode)}%)")
+        for mode in MODES
+    ]
 
 
 def register() -> None:

@@ -93,11 +93,25 @@ def check_browser_menu(mw, report, done) -> None:
         mixed = build_menu_labels([art, basic.id], col)
         other = build_menu_labels([basic.id], col)
         none_sel = build_menu_labels([], col)
+
+        # Expected percentages re-derived from the fixture's own progress
+        # fields and Content line count (labels show the FIRST note = art).
+        from .practice_dialog import MODES, MODE_LABELS
+        from .storage import field_to_lines
+
+        note = col.get_note(art)
+        total = len(field_to_lines(note["Content"]))
+
+        def pct(skill: str) -> int:
+            line = get_progress(note, skill)
+            if total <= 0 or line <= 0:
+                return 0
+            if line >= total:
+                return 100
+            return int(line * 100.0 / total + 0.5)
+
         expected = [
-            ("listening", "Practice: Listening"),
-            ("speaking", "Practice: Speaking"),
-            ("reading", "Practice: Reading"),
-            ("writing", "Practice: Writing"),
+            (mode, f"{MODE_LABELS[mode]} ({pct(mode)}%)") for mode in MODES
         ]
         report["ok"] = (
             labels == expected
