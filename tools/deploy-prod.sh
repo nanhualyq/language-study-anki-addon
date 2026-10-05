@@ -11,17 +11,17 @@
 # different profile is selected would also apply on next switch).
 #
 # Usage:
-#   tools/deploy-prod.sh [--force] [--no-backup] [--dry-run] [--base DIR]
+#   tools/deploy-prod.sh [--force] [--dry-run] [--base DIR]
 #
 #   --force     deploy even if Anki appears to be running (changes only
 #               take effect on restart; a scratch Anki also trips the check)
-#   --no-backup don't keep a backup of the previously installed copy
 #   --dry-run   print the plan and change nothing
 #   --base DIR  deploy into DIR instead of the default Anki base
 #               (same meaning as Anki's ANKI_BASE env var)
 #
-# The previously installed copy is moved to <dest>.bak first; its meta.json
-# (Anki's per-install add-on state) is carried over, not the repo's.
+# The previously installed copy is replaced in place — no backup is kept
+# (git history is the backup). Its meta.json (Anki's per-install add-on
+# state) is carried over, not the repo's.
 # Excluded from the copy: __pycache__/, *.pyc, meta.json.
 set -euo pipefail
 
@@ -30,14 +30,12 @@ SRC="$REPO/language_study_anki"
 PKG="language_study_anki"
 
 FORCE=0
-BACKUP=1
 DRY_RUN=0
 BASE_OVERRIDE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --force)   FORCE=1 ;;
-    --no-backup) BACKUP=0 ;;
     --dry-run) DRY_RUN=1 ;;
     --base)    shift; BASE_OVERRIDE="${1:?--base needs a directory}" ;;
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -141,7 +139,6 @@ FILE_COUNT=$(find "$SRC" -type f ! -name '*.pyc' ! -name 'meta.json' \
 echo "source : $SRC ($FILE_COUNT files)"
 echo "target : $DEST"
 [ -n "$DEFAULT_PROFILE" ] && echo "base   : $BASE  (default profile: $DEFAULT_PROFILE)"
-[ -e "$DEST" ] && echo "backup : $DEST.bak (previous copy, unless --no-backup)"
 if [ "$RUNNING" = 1 ]; then echo "note   : Anki is running (--force)"; fi
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -158,14 +155,7 @@ if [ -f "$DEST/meta.json" ]; then
   cp "$DEST/meta.json" "$SAVED_META"
 fi
 
-if [ -e "$DEST" ]; then
-  if [ "$BACKUP" = 1 ]; then
-    rm -rf "$DEST.bak"
-    mv "$DEST" "$DEST.bak"
-  else
-    rm -rf "$DEST"
-  fi
-fi
+rm -rf "$DEST"
 
 mkdir -p "$(dirname "$DEST")"
 cp -R "$SRC" "$DEST"
