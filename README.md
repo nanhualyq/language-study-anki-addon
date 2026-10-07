@@ -20,7 +20,7 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
 - **One practice dialog, four modes** — line-based rendering, scroll restore to
   the last extracted line, learned-line styling that updates live after an
   extract, per-line TTS (listening/speaking only).
-- **Extract with `Ctrl+E`** — builds a prefilled note in Anki's native Add
+- **Extract with `a`** — builds a prefilled note in Anki's native Add
   dialog (deck `English`), per the reference behavior:
 
   | Mode | Note type | Front | Back | Phone |

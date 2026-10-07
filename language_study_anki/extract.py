@@ -30,7 +30,7 @@ def _log(dialog, msg: str) -> None:
 
 
 def run_extract(dialog) -> None:
-    """Ctrl+E handler. No selection → nothing happens (spec scenario)."""
+    """Bare `a` shortcut handler. No selection → nothing happens (spec scenario)."""
     sel = dialog.selection
     if not sel:
         _log(dialog, "noop:no-selection")

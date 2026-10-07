@@ -193,7 +193,7 @@ body.mode-reading #trans-toggle { display: inline-block; }
   <button id="trans-toggle">Show translation</button>
 </div>
 <div id="app"></div>
-<div class="hint">select text &amp; press Ctrl+E to extract</div>
+<div class="hint">select text &amp; press a to extract</div>
 <script>
 const D = __LSA_DATA__;
 document.getElementById('pf').textContent = D.progressField + ':' + D.progress;
@@ -350,9 +350,10 @@ document.addEventListener('selectionchange', function(){
   sendSel(computeSel());
 });
 
-/* ---- Ctrl+E ---- */
+/* ---- bare `a` extract shortcut (no modifiers) ---- */
 document.addEventListener('keydown', function(e){
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
+  if ((e.key === 'a' || e.key === 'A') &&
+      !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
     e.preventDefault();
     pycmd('lsa:extract');
   }

@@ -1,10 +1,4 @@
-# practice-extract Specification
-
-## Purpose
-
-Turns selected text from a practice session into a vocabulary note prefilled in Anki's Add dialog, with dictionary-backed definitions and article context, replacing the external AnkiConnect hop with direct in-process note construction.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Keyboard shortcut triggers extraction
 The system SHALL provide a bare `a` key shortcut in the practice dialog that sends the current selection to Anki's Add dialog. The shortcut SHALL trigger only on the unmodified `a` key (no Ctrl, Meta, Alt, or Shift held); modified combinations such as `Ctrl+E` or `Ctrl+A` SHALL NOT trigger extraction. The shortcut SHALL have no effect when no selection exists. When a required note type or deck is missing, the shortcut SHALL first obtain the user's confirmation to create it; declining cancels the extraction.
@@ -66,28 +60,3 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 #### Scenario: Whole-line selection extracts
 - **WHEN** the user selects an entire line (selection endpoints at the line's boundaries) and presses `a`
 - **THEN** extraction proceeds with start=0 and end=line length
-
-### Requirement: Dictionary lookup failure tolerance
-The system SHALL treat Youdao lookup network failures and timeouts as empty results and SHALL NOT surface errors that interrupt extraction.
-
-#### Scenario: Network unavailable
-- **WHEN** the Youdao request fails or times out during extraction
-- **THEN** extraction continues with the translation-line fallback (or empty `Back`), and the Add dialog still opens
-
-### Requirement: Prefilled Add dialog handoff
-The system SHALL open Anki's native Add dialog with the constructed note prefilled, without creating the note until the user confirms. Extraction SHALL NOT require AnkiConnect or any external process.
-
-#### Scenario: User confirms
-- **WHEN** the Add dialog opens with the prefilled note and the user confirms
-- **THEN** the note is added to deck `English` with the chosen note type
-
-#### Scenario: User cancels
-- **WHEN** the Add dialog opens and the user cancels
-- **THEN** no note is created
-
-### Requirement: Extraction updates skill progress
-After the Add dialog is opened for an extraction from line N, the system SHALL set the current mode's progress field to at least N.
-
-#### Scenario: Progress advances on extract
-- **WHEN** the user extracts from line N in Reading mode and `ProgReading` holds a value below N
-- **THEN** `ProgReading` is set to N after the extraction flow completes

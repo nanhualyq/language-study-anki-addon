@@ -500,7 +500,7 @@ def check_extract_all_modes(mw, report, done) -> None:
     """Tasks 5.4 + 5.5 + 3.2 across ALL four modes.
 
     Per mode: capture selection (fails fast — the reported 'other modes do
-    nothing' bug), fire Ctrl+E, assert the Add dialog opened, the mode's
+    nothing' bug), fire `a`, assert the Add dialog opened, the mode's
     progress advanced to the extract line, the per-mode note type was used,
     and no error hit the extract log.
     """
@@ -516,7 +516,7 @@ def check_extract_all_modes(mw, report, done) -> None:
 
     fire_js = (
         "(function(){document.dispatchEvent(new KeyboardEvent('keydown',"
-        "{key:'e',ctrlKey:true,bubbles:true,cancelable:true}));"
+        "{key:'a',bubbles:true,cancelable:true}));"
         "return 'fired';})()"
     )
 
