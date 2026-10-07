@@ -153,8 +153,7 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 #toolbar .field { color: #888; font-size: 12px; }
 .line { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start;
   border-bottom: 1px solid #f0f0f0; }
-.line.learned { background: #f2f9f2; }
-.line.learned .ln { color: #4a4; }
+.line.learned { opacity: 0.6; }
 /* Per-row disclosure control (HTML <details>-style). The ONLY way to reveal
    hidden per-line content: clicking the row itself never toggles anything,
    so selecting/clicking text can no longer hide the line by accident. */
