@@ -155,6 +155,15 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
   border-bottom: 1px solid #f0f0f0; }
 .line.learned { background: #f2f9f2; }
 .line.learned .ln { color: #4a4; }
+/* Per-row disclosure control (HTML <details>-style). The ONLY way to reveal
+   hidden per-line content: clicking the row itself never toggles anything,
+   so selecting/clicking text can no longer hide the line by accident. */
+.twisty { flex: 0 0 auto; width: 28px; margin-top: 1px; padding: 0; border: 0;
+  background: transparent; color: #888; font-size: 20px; line-height: 1.25;
+  text-align: center; cursor: pointer; border-radius: 4px; }
+.twisty:hover { color: #333; background: #ececec; }
+.twisty.ghost { visibility: hidden; cursor: default; }
+.line.open .twisty { color: #444; }
 .play { flex: 0 0 auto; border: 1px solid #bbb; background: #fff; border-radius: 4px;
   cursor: pointer; padding: 2px 8px; font-size: 12px; }
 .body { flex: 1 1 auto; min-width: 0; }
@@ -165,13 +174,15 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 .empty { padding: 60px 20px; text-align: center; color: #888; font-size: 18px; }
 /* mode rules */
 body.mode-listening .primary { display: none; }
-body.mode-listening .line.expanded .primary { display: block; }
+body.mode-listening .line.open .primary { display: block; }
 body.mode-speaking .primary { display: block; }
 body.mode-reading .primary { display: block; }
-body.mode-reading.show-trans .secondary { display: block; }
 body.mode-writing .primary { display: block; }
 body.mode-writing .line .secondary.source { display: none; }
-body.mode-writing .line.revealed .secondary.source { display: block; }
+/* What a row's twisty reveals, per mode. */
+body.mode-reading .line.open .secondary,
+body.mode-speaking .line.open .secondary { display: block; }
+body.mode-writing .line.open .secondary.source { display: block; }
 #trans-toggle { display: none; }
 body.mode-reading #trans-toggle { display: inline-block; }
 .hint { position: fixed; bottom: 8px; right: 14px; color: #aaa; font-size: 11px; }
@@ -211,8 +222,19 @@ if (D.lines.length === 0) {
       main = '<div class="primary sel-area">' + esc(src) + '</div>' +
              '<div class="secondary">' + esc(tr) + '</div>';
     }
+    /* Text hidden by default in this mode — what the row's twisty reveals.
+       Rows with nothing hidden get an invisible placeholder so every line
+       keeps the same indent. */
+    const hidden = D.mode === 'listening' ? src
+                 : D.mode === 'writing' ? (hasTrans ? src : '')
+                 : tr;
+    const twisty = hidden.length > 0
+      ? '<button class="twisty" data-twisty="' + i + '" aria-expanded="false"' +
+        ' title="Show / hide hidden text">&#9656;</button>'
+      : '<span class="twisty ghost"></span>';
     html += '<div class="line' + (i <= learnedTo ? ' learned' : '') +
             '" data-line="' + i + '">' +
+            twisty +
             (showPlay ? '<button class="play" data-play="' + i + '">&#9654;</button>' : '') +
             '<div class="body">' + main + '</div>' +
             '<div class="ln">' + i + '</div></div>';
@@ -242,26 +264,39 @@ window.markLearnedUpTo = function(n){
   D.progress = Math.max(D.progress || 0, n);
 };
 
+/* Single reveal mechanism for all four modes: a per-row twisty button.
+   `open` on the row is the only thing CSS keys off (see mode rules above). */
+function setOpen(row, on){
+  row.classList.toggle('open', on);
+  const t = row.querySelector('[data-twisty]');
+  if (t) {
+    t.setAttribute('aria-expanded', on ? 'true' : 'false');
+    t.innerHTML = on ? '&#9662;' : '&#9656;';
+  }
+}
+
+/* Reading: global toggle drives the same per-row state, so the toolbar
+   button and the twisties never disagree. */
 document.getElementById('trans-toggle').addEventListener('click', function(){
-  document.body.classList.toggle('show-trans');
-  this.textContent = document.body.classList.contains('show-trans')
-    ? 'Hide translation' : 'Show translation';
+  const rows = app.querySelectorAll('.line');
+  const openAll = Array.prototype.some.call(
+    rows, r => !r.classList.contains('open'));
+  Array.prototype.forEach.call(rows, r => setOpen(r, openAll));
+  this.textContent = openAll ? 'Hide translation' : 'Show translation';
 });
 
 app.addEventListener('click', function(e){
+  const t = e.target.closest('[data-twisty]');
+  if (t) {
+    const row = t.closest('.line');
+    setOpen(row, !row.classList.contains('open'));
+    return;
+  }
   const p = e.target.closest('[data-play]');
   if (p) { pycmd('lsa:play:' + p.dataset.play); return; }
-  const row = e.target.closest('.line');
-  if (!row) return;
-  /* Selecting text or clicking on text must never toggle visibility
-     (bug fixed: expanded/revealed content hid on every selection click). */
-  const s = window.getSelection();
-  if (s && s.toString().length > 0) return;
-  /* In writing, clicks on the (selectable) translation still toggle the
-     source reveal — only listening/speaking/reading guard text clicks. */
-  if (D.mode !== 'writing' && e.target.closest('.sel-area')) return;
-  if (D.mode === 'listening') row.classList.toggle('expanded');
-  else if (D.mode === 'writing') row.classList.toggle('revealed');
+  /* Everything else is a no-op: clicking a row (or its text) must NEVER
+     show/hide content — it only starts selections. Reveal/tuck away is the
+     twisty button's job alone. */
 });
 
 /* ---- selection capture (single-line, within a .sel-area) ---- */

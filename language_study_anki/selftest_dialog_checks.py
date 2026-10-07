@@ -139,35 +139,54 @@ _JS_EMPTY = (
 _JS_READING = (
     "var sec=document.querySelector('.line .secondary');"
     "var s0=getComputedStyle(sec).display;"
+    "document.querySelector('.line .body').click();"
+    "var s0row=getComputedStyle(sec).display;"
     "document.getElementById('trans-toggle').click();"
     "var s1=getComputedStyle(sec).display;"
+    "document.getElementById('trans-toggle').click();"
+    "var s2=getComputedStyle(sec).display;"
+    "var tw=document.querySelector('[data-line=\"1\"] [data-twisty]');"
+    "if(tw) tw.click();"
+    "var s3=getComputedStyle(sec).display;"
     "JSON.stringify({"
     "rows: document.querySelectorAll('.line').length,"
     "primary: getComputedStyle(document.querySelector('.line .primary')).display,"
-    "s0: s0, s1: s1,"
+    "s0: s0, s0row: s0row, s1: s1, s2: s2, s3: s3,"
+    "twisty: !!tw,"
     "toggle: !!document.getElementById('trans-toggle')"
     "})"
 )
 _JS_LISTENING = (
     "var p=document.querySelector('.line .primary');"
     "var before=getComputedStyle(p).display;"
-    "document.querySelector('.line').click();"
-    "JSON.stringify({before:before, after:getComputedStyle(p).display})"
+    "document.querySelector('.line .body').click();"
+    "var afterRow=getComputedStyle(p).display;"
+    "var tw=document.querySelector('[data-twisty]');"
+    "if(tw) tw.click();"
+    "JSON.stringify({before:before, afterRow:afterRow, twisty:!!tw,"
+    "after:getComputedStyle(p).display})"
 )
 _JS_WRITING = (
     "var p=document.querySelector('.line .primary');"
     "var src=document.querySelector('.line .secondary.source');"
     "var text0=p.textContent;"
     "var srcBefore=getComputedStyle(src).display;"
-    "document.querySelector('.line').click();"
-    "JSON.stringify({text0:text0, srcBefore:srcBefore,"
-    "srcAfter:getComputedStyle(src).display})"
+    "document.querySelector('.line .body').click();"
+    "var srcAfterRow=getComputedStyle(src).display;"
+    "var tw=document.querySelector('[data-twisty]');"
+    "if(tw) tw.click();"
+    "JSON.stringify({text0:text0, srcBefore:srcBefore, twisty:!!tw,"
+    "srcAfterRow:srcAfterRow, srcAfter:getComputedStyle(src).display})"
 )
 _JS_SPEAKING = (
+    "var sec=document.querySelector('.line .secondary');"
+    "var before=getComputedStyle(sec).display;"
+    "var tw=document.querySelector('[data-twisty]');"
+    "if(tw) tw.click();"
     "JSON.stringify({"
     "primary: getComputedStyle(document.querySelector('.line .primary')).display,"
-    "play: !!document.querySelector('.play')"
-    "})"
+    "play: !!document.querySelector('.play'), twisty: !!tw, before: before,"
+    "after:getComputedStyle(sec).display})"
 )
 
 
@@ -180,8 +199,15 @@ def _ev_reading(payload):
     ok = (
         d["rows"] == len(LINES12)
         and d["primary"] != "none"
+        # closed by default, and a plain row click must not reveal it
         and d["s0"] == "none"
+        and d["s0row"] == "none"
+        # toolbar toggle opens every row, and closes them again
         and d["s1"] != "none"
+        and d["s2"] == "none"
+        # the row's own twisty opens just that row
+        and d["twisty"]
+        and d["s3"] != "none"
         and d["toggle"]
     )
     return ok, d
@@ -189,18 +215,37 @@ def _ev_reading(payload):
 
 def _ev_listening(payload):
     d = json.loads(payload)
-    return d["before"] == "none" and d["after"] != "none", d
+    ok = (
+        d["before"] == "none"
+        and d["twisty"]
+        and d["afterRow"] == "none"   # row click never toggles
+        and d["after"] != "none"       # twisty does
+    )
+    return ok, d
 
 
 def _ev_writing(payload):
     d = json.loads(payload)
-    ok = d["text0"] == TRANS12[0] and d["srcBefore"] == "none" and d["srcAfter"] != "none"
+    ok = (
+        d["text0"] == TRANS12[0]
+        and d["twisty"]
+        and d["srcBefore"] == "none"
+        and d["srcAfterRow"] == "none"  # row click never toggles
+        and d["srcAfter"] != "none"      # twisty does
+    )
     return ok, d
 
 
 def _ev_speaking(payload):
     d = json.loads(payload)
-    return d["primary"] != "none" and d["play"], d
+    ok = (
+        d["primary"] != "none"
+        and d["play"]
+        and d["twisty"]
+        and d["before"] == "none"
+        and d["after"] != "none"
+    )
+    return ok, d
 
 
 def check_dialog_modes(mw, report, done) -> None:
@@ -518,7 +563,10 @@ def check_extract_all_modes(mw, report, done) -> None:
             "(function(){"
             f"var row=document.querySelector('[data-line=\"{ln}\"] .sel-area');"
             "if(!row) return 'no-row';"
-            "row.classList.add('expanded'); row.classList.add('revealed');"
+            # Reveal the hidden text first: in Listening/Writing the target is
+            # not rendered (display:none) until the row's twisty opens it.
+            f"var tw=document.querySelector('[data-line=\"{ln}\"] [data-twisty]');"
+            "if(tw) tw.click();"
             "var t=row.firstChild;"
             "var r=document.createRange(); r.setStart(t,0); r.setEnd(t,7);"
             "var s=getSelection(); s.removeAllRanges(); s.addRange(r);"
