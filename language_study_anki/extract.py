@@ -79,7 +79,12 @@ def _on_entries(dialog, sel: dict, result_or_future) -> None:
             result = result.result()
         if not isinstance(result, youdao.LookupResult):
             result = youdao.LookupResult((), ())
-        _log(dialog, f"lookup:{len(result.entries)} entries phon:{len(result.phonetics)}")
+        reason = getattr(youdao, "last_error", "")
+        _log(
+            dialog,
+            f"lookup:{len(result.entries)} entries phon:{len(result.phonetics)}"
+            + (f" err:{reason}" if reason else ""),
+        )
         _open_add_dialog(dialog, sel, result)
         _log(dialog, "done")
     except Exception:

@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import tempfile
 import unittest
 import urllib.error
 from unittest import mock
@@ -150,3 +152,64 @@ class PhoneticsTests(unittest.TestCase):
         with patch_response(EXPAND_EC):
             res = lookup("ephemeral")
         self.assertEqual(res.phonetics, ())
+
+
+class DiagnosticsTests(unittest.TestCase):
+    """Failures stay traceable: a log line + last_error, and never a raise."""
+
+    def setUp(self):
+        self.log_file = os.path.join(tempfile.mkdtemp(), "youdao.log")
+        env = mock.patch.dict(os.environ, {"LSA_YOUDAO_LOG": self.log_file})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _log_text(self):
+        with open(self.log_file, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_success_not_logged_and_last_error_cleared(self):
+        with patch_response(EXPAND_EC):
+            res = lookup("ephemeral")
+        self.assertTrue(res.entries)
+        self.assertEqual(youdao.last_error, "")
+        self.assertFalse(os.path.exists(self.log_file))  # success writes nothing
+
+    def test_network_failure_logged_with_reason(self):
+        with mock.patch.object(
+            youdao.urllib.request,
+            "urlopen",
+            side_effect=urllib.error.URLError("down"),
+        ):
+            self.assertEqual(lookup("ephemeral"), LookupResult((), ()))
+        self.assertIn("URLError", youdao.last_error)
+        self.assertIn("FAIL URLError", self._log_text())
+
+    def test_non_200_logged_with_status(self):
+        with patch_response(EXPAND_EC, status=500):
+            self.assertEqual(lookup("ephemeral"), LookupResult((), ()))
+        self.assertEqual(youdao.last_error, "http 500")
+        self.assertIn("FAIL http 500", self._log_text())
+
+    def test_no_dict_fields_logged_with_response_keys(self):
+        # dict.youdao.com answers full sentences without ec/expand_ec.
+        with patch_response({"input": "whole line", "lang": "en"}):
+            self.assertEqual(lookup("a whole sentence"), LookupResult((), ()))
+        self.assertIn("no dictionary fields", youdao.last_error)
+        self.assertIn("input", self._log_text())
+
+    def test_unwritable_log_never_breaks_lookup(self):
+        blocker = os.path.join(tempfile.mkdtemp(), "blocker")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("not a directory")
+        bad_path = os.path.join(blocker, "sub", "youdao.log")  # parent is a file
+        with mock.patch.dict(os.environ, {"LSA_YOUDAO_LOG": bad_path}):
+            with patch_response({"input": "x"}):  # empty outcome → records
+                res = lookup("hello")
+        # _record failed internally, but the lookup still completed normally
+        self.assertEqual(res, LookupResult((), ()))
+        self.assertIn("no dictionary fields", youdao.last_error)
+        self.assertFalse(os.path.exists(bad_path))
+
+    def test_empty_word_records_nothing(self):
+        lookup("   ")
+        self.assertFalse(os.path.exists(self.log_file))
