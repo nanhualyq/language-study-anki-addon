@@ -153,7 +153,10 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 #toolbar .field { color: #888; font-size: 12px; }
 .line { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start;
   border-bottom: 1px solid #f0f0f0; }
-.line.learned { opacity: 0.6; }
+/* Learned rows: light gray background band instead of reduced opacity.
+   Opacity is a subtractive signal — in Listening mode a closed row has
+   almost nothing to fade — and it would also dim this row's own tint. */
+.line.learned { background: #f1f1f2; }
 /* Per-row disclosure control (HTML <details>-style). The ONLY way to reveal
    hidden per-line content: clicking the row itself never toggles anything,
    so selecting/clicking text can no longer hide the line by accident. */

@@ -633,6 +633,225 @@ def check_extract_all_modes(mw, report, done) -> None:
     round_start(0)
 
 
+# ---------------------------------------------------------------------- \
+# gray learned-row style (change: gray-learned-row-style)
+# ----------------------------------------------------------------------
+
+
+def check_learned_style(mw, report, done) -> None:
+    """gray-learned-row-style: learned rows carry a gray background band.
+
+    Verifies the spec delta: gray tint perceivable in Listening mode (where a
+    closed learned row shows no text), full opacity + unchanged line-number
+    color, toggle/play/selection/extract on a learned row, live graying after
+    an extract, and no tint without progress.
+    """
+    from .practice_dialog import open_dialog
+    from aqt.qt import QApplication
+
+    col = mw.col
+    art = _ensure_long_article(col)
+    result = report["detail"] = {}
+    result["live_gray"] = {}
+    GRAY = "rgb(241, 241, 242)"  # #f1f1f2 learned-row tint
+    state = {}
+
+    # -- Stage A: listening, progress 15 (learned rows show NO text) -------
+
+    def open_listening():
+        _set_progress_raw(col, art, "listening", 15)
+        state["dlg_a"] = open_dialog(None, art, "listening")
+        after_delay(1300, lambda: _js(state["dlg_a"], js_a, ev_a))
+
+    # Probe computed styles learned-vs-unlearned, then exercise toggle,
+    # selection, and play ON a learned row.
+    js_a = (
+        "(function(){"
+        "var lr=document.querySelector('.line.learned');"
+        "var ur=document.querySelector('[data-line=\"20\"]');"
+        "var p=lr.querySelector('.primary');"
+        "var before=getComputedStyle(p).display;"
+        "var tw=lr.querySelector('[data-twisty]');"
+        "if(tw) tw.click();"
+        "var after=getComputedStyle(p).display;"
+        "var area=lr.querySelector('.sel-area');"
+        "var t=area.firstChild; var r=document.createRange();"
+        "r.setStart(t,0); r.setEnd(t,6);"
+        "var s=getSelection(); s.removeAllRanges(); s.addRange(r);"
+        "document.dispatchEvent(new Event('selectionchange'));"
+        "var play=lr.querySelector('.play'); if(play) play.click();"
+        "return JSON.stringify({"
+        "total: document.querySelectorAll('.line').length,"
+        "learned: document.querySelectorAll('.line.learned').length,"
+        "learnedBg: getComputedStyle(lr).backgroundColor,"
+        "unlearnedBg: getComputedStyle(ur).backgroundColor,"
+        "learnedOpacity: getComputedStyle(lr).opacity,"
+        "unlearnedOpacity: getComputedStyle(ur).opacity,"
+        "lnLearned: getComputedStyle(lr.querySelector('.ln')).color,"
+        "lnUnlearned: getComputedStyle(ur.querySelector('.ln')).color,"
+        "primaryBefore: before, primaryAfter: after,"
+        "twisty: !!tw, play: !!play"
+        "});})()"
+    )
+
+    def ev_a(payload):
+        d = json.loads(payload)
+        result["listening"] = d
+        # Style probes are synchronous, but selection/play arrive at the
+        # Python bridge via async pycmd — defer the state read (same 700ms
+        # allowance check_selection_capture uses).
+        after_delay(700, check_state_a)
+
+    def check_state_a():
+        d = result["listening"]
+        dlg_a = state["dlg_a"]
+        d["selection"] = dlg_a.selection
+        d["bridge"] = list(getattr(dlg_a, "bridge_log", []))
+        d["ok"] = (
+            d["total"] == len(LINES12)
+            and d["learned"] == 15
+            # gray band perceivable with no text; unlearned rows untinted
+            and d["learnedBg"] == GRAY
+            and d["unlearnedBg"] != GRAY
+            # no opacity reduction; line-number color unchanged
+            and d["learnedOpacity"] == "1"
+            and d["unlearnedOpacity"] == "1"
+            and d["lnLearned"] == d["lnUnlearned"]
+            # toggle reveals text on a learned row; play + selection work
+            and d["primaryBefore"] == "none"
+            and d["primaryAfter"] != "none"
+            and d["twisty"] and d["play"]
+            and isinstance(d["selection"], dict)
+            and d["selection"].get("line") == 1
+            and any("lsa:play:1" in e for e in d["bridge"])
+        )
+        try:
+            dlg_a.close()
+        except Exception:
+            pass
+        after_delay(500, open_reading)
+
+    # -- Stage B: reading, progress 15 -> extract at line 20 ---------------
+
+    def open_reading():
+        _set_progress_raw(col, art, "reading", 15)
+        state["dlg_b"] = open_dialog(None, art, "reading")
+        after_delay(1300, lambda: _js(state["dlg_b"], js_b1, ev_b1))
+
+    js_b1 = (
+        "(function(){"
+        "var lr=document.querySelector('.line.learned');"
+        "return JSON.stringify({"
+        "learned: document.querySelectorAll('.line.learned').length,"
+        "learnedBg: getComputedStyle(lr).backgroundColor,"
+        "primary: getComputedStyle(lr.querySelector('.primary')).display,"
+        "pf: document.getElementById('pf').textContent"
+        "});})()"
+    )
+
+    def ev_b1(payload):
+        d = json.loads(payload)
+        result["reading_band"] = d
+        d["ok"] = (
+            d["learned"] == 15
+            and d["learnedBg"] == GRAY
+            and d["primary"] != "none"
+            and d["pf"] == "15/40"
+        )
+        _js(state["dlg_b"], js_b2, lambda p: after_delay(8000, ev_b2))
+
+    js_b2 = (
+        "(function(){"
+        "var row=document.querySelector('[data-line=\"20\"] .sel-area');"
+        "var t=row.firstChild; var r=document.createRange();"
+        "r.setStart(t,0); r.setEnd(t,7);"
+        "var s=getSelection(); s.removeAllRanges(); s.addRange(r);"
+        "document.dispatchEvent(new Event('selectionchange'));"
+        "document.dispatchEvent(new KeyboardEvent('keydown',"
+        "{key:'a',bubbles:true,cancelable:true}));"
+        "return 'fired';})()"
+    )
+
+    def ev_b2():
+        d = result["extract"] = {}
+        visible = {
+            id(w) for w in QApplication.topLevelWidgets()
+            if "Add" in type(w).__name__ and w.isVisible()
+        }
+        note = col.get_note(art)
+        d["add_opened"] = bool(visible)
+        d["progress"] = get_progress(note, "reading")
+        _js(state["dlg_b"], js_b3, lambda p: ev_b3(json.loads(p), visible))
+
+    js_b3 = (
+        "(function(){"
+        "var r20=document.querySelector('[data-line=\"20\"]');"
+        "return JSON.stringify({"
+        "hasLearnedClass: r20.classList.contains('learned'),"
+        "bg: getComputedStyle(r20).backgroundColor,"
+        "pf: document.getElementById('pf').textContent"
+        "});})()"
+    )
+
+    def ev_b3(d, visible_adds):
+        d["ok"] = (
+            d["hasLearnedClass"]
+            and d["bg"] == GRAY
+            and d["pf"] == "20/40"
+        )
+        result["live_gray"]["ok"] = d["ok"]
+        result["live_gray"]["detail"] = d
+        result["extract"]["ok"] = (
+            result["extract"]["add_opened"]
+            and result["extract"]["progress"] == 20
+        )
+        try:
+            state["dlg_b"].close()
+        except Exception:
+            pass
+        if visible_adds:
+            target = next(
+                w for w in QApplication.topLevelWidgets() if id(w) in visible_adds
+            )
+            _close_add_dialog(target, open_clean)
+        else:
+            after_delay(300, open_clean)
+
+    # -- Stage C: no progress -> no tint -----------------------------------
+
+    def open_clean():
+        _set_progress_raw(col, art, "reading", 0)
+        state["dlg_c"] = open_dialog(None, art, "reading")
+        after_delay(1300, lambda: _js(state["dlg_c"], js_c, ev_c))
+
+    js_c = (
+        "(function(){"
+        "var r1=document.querySelector('[data-line=\"1\"]');"
+        "return JSON.stringify({"
+        "learned: document.querySelectorAll('.line.learned').length,"
+        "bg1: getComputedStyle(r1).backgroundColor,"
+        "pf: document.getElementById('pf').textContent"
+        "});})()"
+    )
+
+    def ev_c(payload):
+        d = json.loads(payload)
+        result["no_progress"] = d
+        d["ok"] = d["learned"] == 0 and d["bg1"] != GRAY and d["pf"] == "0/40"
+        try:
+            state["dlg_c"].close()
+        except Exception:
+            pass
+        report["ok"] = all(
+            result.get(k, {}).get("ok")
+            for k in ("listening", "reading_band", "extract",
+                      "live_gray", "no_progress")
+        )
+        done()
+
+    open_listening()
+
+
 CHECKS_EXTRA = [
     ("browser_menu", check_browser_menu),
     ("dialog_modes", check_dialog_modes),
@@ -640,4 +859,5 @@ CHECKS_EXTRA = [
     ("selection_capture", check_selection_capture),
     ("tts", check_tts),
     ("extract_all_modes", check_extract_all_modes),
+    ("learned_style", check_learned_style),
 ]
