@@ -141,17 +141,13 @@ _JS_READING = (
     "var s0=getComputedStyle(sec).display;"
     "document.querySelector('.line .body').click();"
     "var s0row=getComputedStyle(sec).display;"
-    "document.getElementById('trans-toggle').click();"
-    "var s1=getComputedStyle(sec).display;"
-    "document.getElementById('trans-toggle').click();"
-    "var s2=getComputedStyle(sec).display;"
     "var tw=document.querySelector('[data-line=\"1\"] [data-twisty]');"
     "if(tw) tw.click();"
     "var s3=getComputedStyle(sec).display;"
     "JSON.stringify({"
     "rows: document.querySelectorAll('.line').length,"
     "primary: getComputedStyle(document.querySelector('.line .primary')).display,"
-    "s0: s0, s0row: s0row, s1: s1, s2: s2, s3: s3,"
+    "s0: s0, s0row: s0row, s3: s3,"
     "twisty: !!tw,"
     "toggle: !!document.getElementById('trans-toggle')"
     "})"
@@ -202,13 +198,11 @@ def _ev_reading(payload):
         # closed by default, and a plain row click must not reveal it
         and d["s0"] == "none"
         and d["s0row"] == "none"
-        # toolbar toggle opens every row, and closes them again
-        and d["s1"] != "none"
-        and d["s2"] == "none"
         # the row's own twisty opens just that row
         and d["twisty"]
         and d["s3"] != "none"
-        and d["toggle"]
+        # no bulk toolbar toggle exists any more
+        and not d["toggle"]
     )
     return ok, d
 

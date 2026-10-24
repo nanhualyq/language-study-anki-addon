@@ -182,21 +182,29 @@ body.mode-writing .line .secondary.source { display: none; }
 body.mode-reading .line.open .secondary,
 body.mode-speaking .line.open .secondary { display: block; }
 body.mode-writing .line.open .secondary.source { display: block; }
-#trans-toggle { display: none; }
-body.mode-reading #trans-toggle { display: inline-block; }
-.hint { position: fixed; bottom: 8px; right: 14px; color: #aaa; font-size: 11px; }
+/* Hint lives in the toolbar's right end (not floating over the article);
+   kbd renders the shortcut as a keycap, distinct from plain text. */
+#toolbar .hint { margin-left: auto; color: #aaa; font-size: 11px; white-space: nowrap; }
+#toolbar kbd { display: inline-block; padding: 1px 5px; border: 1px solid #ccc;
+  border-bottom-width: 2px; border-radius: 3px; background: #f7f7f7;
+  font-family: inherit; font-size: 10px; color: #555; }
 </style></head>
 <body class="mode-__MODE__">
 <div id="toolbar">
   <strong id="mode-name">__MODE__</strong>
   <span class="field" id="pf"></span>
-  <button id="trans-toggle">Show translation</button>
+  <span class="hint">select text &amp; press <kbd>a</kbd> to extract</span>
 </div>
 <div id="app"></div>
-<div class="hint">select text &amp; press a to extract</div>
 <script>
 const D = __LSA_DATA__;
-document.getElementById('pf').textContent = D.progressField + ':' + D.progress;
+/* Progress counter: <learned>/<total>, clamped so it can never exceed the
+   article (stored progress can outlive a shortened article). */
+function setCounter(){
+  document.getElementById('pf').textContent =
+    Math.min(D.progress || 0, D.lines.length) + '/' + D.lines.length;
+}
+setCounter();
 
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 const hasTrans = D.translations.length > 0;
@@ -261,6 +269,7 @@ window.markLearnedUpTo = function(n){
     if (r) r.classList.add('learned');
   }
   D.progress = Math.max(D.progress || 0, n);
+  setCounter();
 };
 
 /* Single reveal mechanism for all four modes: a per-row twisty button.
@@ -273,16 +282,6 @@ function setOpen(row, on){
     t.innerHTML = on ? '&#9662;' : '&#9656;';
   }
 }
-
-/* Reading: global toggle drives the same per-row state, so the toolbar
-   button and the twisties never disagree. */
-document.getElementById('trans-toggle').addEventListener('click', function(){
-  const rows = app.querySelectorAll('.line');
-  const openAll = Array.prototype.some.call(
-    rows, r => !r.classList.contains('open'));
-  Array.prototype.forEach.call(rows, r => setOpen(r, openAll));
-  this.textContent = openAll ? 'Hide translation' : 'Show translation';
-});
 
 app.addEventListener('click', function(e){
   const t = e.target.closest('[data-twisty]');
