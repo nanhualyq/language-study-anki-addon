@@ -16,6 +16,8 @@ from language_study_anki.provisioning import (
     ARTICLE_NOTE_TYPE,
     EXTRACT_DECK,
     EXTRACT_NOTE_TYPES,
+    _create_article_model,
+    _create_extract_model,
     build_confirm_message,
     ensure_extract_notetype,
     missing_items,
@@ -190,6 +192,122 @@ class AdoptedTypeAdditiveRepairTest(unittest.TestCase):
         names = [f["name"] for f in model["flds"]]
         self.assertIn("Cover", names)
         self.assertNotIn("Phone", names)  # non-audio type
+
+
+# --- production reference literals (captured 2026-10-25) -----------------
+_PROD_CSS_EXTRACT = (
+    ".card {\n"
+    "    font-family: arial;\n"
+    "    font-size: 20px;\n"
+    "    text-align: center;\n"
+    "    color: black;\n"
+    "    background-color: white;\n"
+    "}\n"
+)
+_PROD_CSS_ARTICLE = (
+    ".card {\n"
+    "    font-family: arial;\n"
+    "    font-size: 20px;\n"
+    "    line-height: 1.5;\n"
+    "    text-align: center;\n"
+    "    color: black;\n"
+    "    background-color: white;\n"
+    "}\n"
+)
+_PROD_HEADER = (
+    '<p style="font-size: small; color: gray;">\n'
+    "{{Deck}} {{#Tags}}#{{Tags}}{{/Tags}}\n"
+    "{{#Title}} <br>{{Title}} {{/Title}}\n"
+    '{{#Url}} <br><a href="{{Url}}">{{Url}}</a> {{/Url}}\n'
+    "</p>\n\n"
+)
+_PROD_COVER = "{{#Cover}}<br>{{Cover}}{{/Cover}}\n"
+
+
+class ProductionParityTest(unittest.TestCase):
+    """A freshly created note type matches the production collection captured
+    2026-10-25: field order, sticky flags, card templates, browser template,
+    CSS, and sort field (change: sync-note-types-from-production)."""
+
+    def _build(self, name):
+        mm = _FakeModelMgr()
+        if name == ARTICLE_NOTE_TYPE:
+            return _create_article_model(mm)
+        return _create_extract_model(mm, name)
+
+    @staticmethod
+    def _sticky(model):
+        return {f["name"]: f.get("sticky", False) for f in model["flds"]}
+
+    def test_article_parity(self):
+        m = self._build(ARTICLE_NOTE_TYPE)
+        self.assertEqual(
+            [f["name"] for f in m["flds"]],
+            [
+                "Title", "Content", "Translation", "Url",
+                "ProgListening", "ProgSpeaking", "ProgReading", "ProgWriting",
+                "Cover",
+            ],
+        )
+        self.assertFalse(any(self._sticky(m).values()))  # none sticky
+        self.assertEqual(m["sortf"], 0)  # Title
+        self.assertEqual(m["css"], _PROD_CSS_ARTICLE)
+        self.assertEqual(m["tmpls"][0]["qfmt"], "{{Title}}")
+        self.assertEqual(
+            m["tmpls"][0]["afmt"], '{{FrontSide}}<hr id="answer">{{Content}}'
+        )
+
+    def test_readwrite_parity(self):
+        m = self._build("LSA-ReadWrite")
+        self.assertEqual(
+            [f["name"] for f in m["flds"]],
+            ["Front", "Back", "Url", "Title", "Cover"],
+        )
+        self.assertEqual(
+            self._sticky(m),
+            {"Front": True, "Back": True, "Url": True, "Title": True, "Cover": False},
+        )
+        self.assertEqual(m["sortf"], 0)  # Front
+        self.assertEqual(m["css"], _PROD_CSS_EXTRACT)
+        t = m["tmpls"][0]
+        self.assertEqual(t["qfmt"], _PROD_HEADER + "{{Front}}\n\n" + _PROD_COVER)
+        self.assertEqual(t["afmt"], "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n")
+        self.assertEqual(t["bqfmt"], "{{Front}}")
+
+    def test_listen_parity(self):
+        m = self._build("LSA-Listen")
+        self.assertEqual(
+            [f["name"] for f in m["flds"]],
+            ["Front", "Back", "Phone", "Url", "Title", "Cover"],
+        )
+        self.assertEqual(
+            self._sticky(m),
+            {"Front": True, "Back": True, "Phone": False, "Url": True, "Title": True, "Cover": False},
+        )
+        self.assertEqual(m["sortf"], 0)  # Front
+        self.assertEqual(m["css"], _PROD_CSS_EXTRACT)
+        t = m["tmpls"][0]
+        self.assertEqual(
+            t["qfmt"], _PROD_HEADER + "{{Front}}\n<br>\n{{tts en_US :Back}}\n\n" + _PROD_COVER
+        )
+        self.assertEqual(
+            t["afmt"], "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n\n<p>{{Phone}}</p>"
+        )
+        self.assertEqual(t["bqfmt"], "{{Front}}")
+
+    def test_speak_parity(self):
+        m = self._build("LSA-Speak")
+        self.assertEqual(
+            [f["name"] for f in m["flds"]],
+            ["Front", "Back", "Phone", "Url", "Title", "Cover"],
+        )
+        t = m["tmpls"][0]
+        self.assertEqual(t["qfmt"], _PROD_HEADER + "{{Front}}\n\n" + _PROD_COVER)
+        self.assertEqual(
+            t["afmt"], "{{FrontSide}}\n\n<hr id=answer>\n\n{{tts en_US :Back}}\n\n<p>{{Phone}}</p>"
+        )
+        self.assertEqual(t["bqfmt"], "{{Front}}")
+        self.assertEqual(m["css"], _PROD_CSS_EXTRACT)
 
 
 if __name__ == "__main__":

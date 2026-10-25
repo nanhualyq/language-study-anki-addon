@@ -18,9 +18,13 @@ from __future__ import annotations
 ARTICLE_NOTE_TYPE = "LSA-Article"
 EXTRACT_DECK = "English"
 EXTRACT_NOTE_TYPES = ["LSA-ReadWrite", "LSA-Listen", "LSA-Speak"]
-# ``Cover`` is user-maintained on LSA-Article and copied into each extract;
-# it is addon-provisioned on the extract types (added to adopted types too).
-EXTRACT_FIELD_NAMES = ["Front", "Back", "Title", "Url", "Cover"]
+
+# Production is the source of truth (captured 2026-10-25). Field order below
+# matches it exactly; ``Cover`` is provisioned on every type including the
+# article. ``required_extract_fields`` returns the ordered production list —
+# its additive-repair role only checks membership, never reorders.
+EXTRACT_FIELD_NAMES = ["Front", "Back", "Url", "Title", "Cover"]
+STICKY_EXTRACT_FIELDS = frozenset({"Front", "Back", "Url", "Title"})
 ARTICLE_FIELDS = [
     "Title",
     "Content",
@@ -30,15 +34,17 @@ ARTICLE_FIELDS = [
     "ProgSpeaking",
     "ProgReading",
     "ProgWriting",
+    "Cover",
 ]
-# Audio extract types carry an extra phonetics field (reference behavior).
+# Audio extract types carry an extra phonetics field (reference behavior);
+# production places ``Phone`` third, right after ``Back``.
 AUDIO_EXTRACT_NOTE_TYPES = ("LSA-Listen", "LSA-Speak")
 
 
 def required_extract_fields(name: str) -> list[str]:
     fields = list(EXTRACT_FIELD_NAMES)
     if name in AUDIO_EXTRACT_NOTE_TYPES:
-        fields.append("Phone")
+        fields.insert(2, "Phone")
     return fields
 # Extraction target per practice mode (spec: practice-extract).
 MODE_NOTETYPE = {
@@ -47,6 +53,52 @@ MODE_NOTETYPE = {
     "listening": "LSA-Listen",
     "speaking": "LSA-Speak",
 }
+
+
+# Production note-type styling / templates (captured 2026-10-25).
+_CSS_ARTICLE = (
+    ".card {\n"
+    "    font-family: arial;\n"
+    "    font-size: 20px;\n"
+    "    line-height: 1.5;\n"
+    "    text-align: center;\n"
+    "    color: black;\n"
+    "    background-color: white;\n"
+    "}\n"
+)
+_CSS_EXTRACT = (
+    ".card {\n"
+    "    font-family: arial;\n"
+    "    font-size: 20px;\n"
+    "    text-align: center;\n"
+    "    color: black;\n"
+    "    background-color: white;\n"
+    "}\n"
+)
+# Shared gray metadata header on every extract card question.
+_CARD_HEADER = (
+    '<p style="font-size: small; color: gray;">\n'
+    "{{Deck}} {{#Tags}}#{{Tags}}{{/Tags}}\n"
+    "{{#Title}} <br>{{Title}} {{/Title}}\n"
+    '{{#Url}} <br><a href="{{Url}}">{{Url}}</a> {{/Url}}\n'
+    "</p>\n\n"
+)
+_COVER_BLOCK = "{{#Cover}}<br>{{Cover}}{{/Cover}}\n"
+EXTRACT_TEMPLATES = {
+    "LSA-ReadWrite": {
+        "qfmt": _CARD_HEADER + "{{Front}}\n\n" + _COVER_BLOCK,
+        "afmt": "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n",
+    },
+    "LSA-Listen": {
+        "qfmt": _CARD_HEADER + "{{Front}}\n<br>\n{{tts en_US :Back}}\n\n" + _COVER_BLOCK,
+        "afmt": "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}\n\n<p>{{Phone}}</p>",
+    },
+    "LSA-Speak": {
+        "qfmt": _CARD_HEADER + "{{Front}}\n\n" + _COVER_BLOCK,
+        "afmt": "{{FrontSide}}\n\n<hr id=answer>\n\n{{tts en_US :Back}}\n\n<p>{{Phone}}</p>",
+    },
+}
+_EXTRACT_BROWSER_QFMT = "{{Front}}"
 
 
 def _create_article_model(mm) -> dict:
@@ -58,6 +110,7 @@ def _create_article_model(mm) -> dict:
     tmpl["afmt"] = '{{FrontSide}}<hr id="answer">{{Content}}'
     mm.add_template(model, tmpl)
     model["sortf"] = 0  # Title is the sort field
+    model["css"] = _CSS_ARTICLE
     mm.add(model)
     return mm.by_name(ARTICLE_NOTE_TYPE)
 
@@ -65,11 +118,17 @@ def _create_article_model(mm) -> dict:
 def _create_extract_model(mm, name: str) -> dict:
     model = mm.new(name)
     for field in required_extract_fields(name):
-        mm.add_field(model, mm.new_field(field))
+        fld = mm.new_field(field)
+        fld["sticky"] = field in STICKY_EXTRACT_FIELDS
+        mm.add_field(model, fld)
     tmpl = mm.new_template("Card 1")
-    tmpl["qfmt"] = "{{Front}}"
-    tmpl["afmt"] = '{{FrontSide}}<hr id="answer">{{Back}}'
+    spec = EXTRACT_TEMPLATES[name]
+    tmpl["qfmt"] = spec["qfmt"]
+    tmpl["afmt"] = spec["afmt"]
+    tmpl["bqfmt"] = _EXTRACT_BROWSER_QFMT
     mm.add_template(model, tmpl)
+    model["sortf"] = 0  # Front is the sort field
+    model["css"] = _CSS_EXTRACT
     mm.add(model)
     return mm.by_name(name)
 

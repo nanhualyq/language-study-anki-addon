@@ -7,7 +7,7 @@ Stores English articles and per-skill learning progress as native Anki notes, so
 ## Requirements
 
 ### Requirement: Article note type
-The system SHALL represent an article as an Anki note of an addon-provisioned `LSA-Article` note type with fields `Title`, `Content`, `Translation`, `Url`, `ProgListening`, `ProgSpeaking`, `ProgReading`, and `ProgWriting`. `Title` SHALL be the sort field. `Translation` and `Url` MAY be empty.
+The system SHALL represent an article as an Anki note of an addon-provisioned `LSA-Article` note type with fields `Title`, `Content`, `Translation`, `Url`, `ProgListening`, `ProgSpeaking`, `ProgReading`, `ProgWriting`, and `Cover`. `Title` SHALL be the sort field. `Translation`, `Url`, and `Cover` MAY be empty.
 
 #### Scenario: Store an article with all fields
 - **WHEN** the user creates an article note with a title, English content, a Chinese translation, and a URL
@@ -16,6 +16,10 @@ The system SHALL represent an article as an Anki note of an addon-provisioned `L
 #### Scenario: Store an article without translation or URL
 - **WHEN** the user creates an article note with a title and English content only
 - **THEN** the `Translation` and `Url` fields are stored as empty strings
+
+#### Scenario: Store an article without a cover
+- **WHEN** the user creates an article note without a cover image reference
+- **THEN** the `Cover` field is stored as an empty string, and the note is otherwise complete
 
 ### Requirement: Auto-provisioning of note types and deck
 The system SHALL provision its note types and decks in two stages, each gated by user confirmation. At profile open, when the `LSA-Article` note type is missing, the system SHALL show one confirmation dialog listing exactly the missing items and create them only when the user accepts. At extraction time, when the extract target note types (`LSA-ReadWrite`, `LSA-Listen`, `LSA-Speak`) or target deck (`English`) are missing, the system SHALL show the same kind of confirmation before creating them, and declining cancels the extraction. Existing note types and decks SHALL be adopted by exact name when present, and provisioning SHALL be idempotent. The system SHALL NOT create or require a dedicated article deck.
