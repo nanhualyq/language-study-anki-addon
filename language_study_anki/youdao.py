@@ -56,8 +56,10 @@ class LookupResult:
 
 
 def format_phonetics(phonetics) -> str:
-    """Flutter parity: 'UK /ɪˈfemərəl/ US /ɪˈfemərəl/' joined by spaces."""
-    return " ".join(f"{region} /{text}/" for region, text in phonetics)
+    """One phonetic per line: 'UK /ɪˈfemərəl/<br>US /ɪˈfemərəl/' — the spec's
+    `<br>`-separator rule for field values. Deliberate divergence from the
+    reference app, which space-joined onto a single line."""
+    return "<br>".join(f"{region} /{text}/" for region, text in phonetics)
 
 
 def _clip(text: str, limit: int = 160) -> str:

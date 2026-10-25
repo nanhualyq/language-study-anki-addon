@@ -29,8 +29,8 @@ The system SHALL provide a bare `a` key shortcut in the practice dialog that sen
 For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior, plus the Speaking mic decoration):
 - **Reading** → note type `@Basic`: `Front` = source context (up to 3 lines above, `<br>`-terminated) with the selection wrapped in `<mark>` + hidden timestamp; `Back` = Youdao dictionary definition, falling back to the translation line at the selected index, else empty.
 - **Writing** → note type `@Basic`: selection is made on the **translation** text; `Front` = translation-line context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
-- **Listening** → note type `@EnListen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics formatted `UK /…/ US /…/` (empty on lookup failure).
-- **Speaking** → note type `@EnSpeak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics as above.
+- **Listening** → note type `@EnListen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics with **one phonetic per line**, `<br>`-separated (i.e. `UK /…/<br>US /…/`; empty on lookup failure).
+- **Speaking** → note type `@EnSpeak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics per-line as above.
 - All types also carry `Title` (article title) and `Url` (article URL or empty). Audio types additionally carry `Phone`.
 All inter-line separators in field values SHALL be `<br>` tags, never raw newlines.
 
@@ -44,11 +44,19 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 
 #### Scenario: Listening masks the selection
 - **WHEN** the user extracts a selection in Listening mode
-- **THEN** `Front` contains the context lines with the selection replaced by `???`, `Back` equals the selected text, and `Phone` contains the phonetics (or is empty when the lookup fails)
+- **THEN** `Front` contains the context lines with the selection replaced by `???`, `Back` equals the selected text, and `Phone` contains the phonetics, one per line, `<br>`-separated (or is empty when the lookup fails)
 
 #### Scenario: Speaking shows the selection
 - **WHEN** the user extracts a selection in Speaking mode
-- **THEN** `Front` wraps the selection in `<mark>` with 🎤 immediately before and after the selected text inside the mark, `Back` equals the selected text without any 🎤, and `Phone` contains the phonetics
+- **THEN** `Front` wraps the selection in `<mark>` with 🎤 immediately before and after the selected text inside the mark, `Back` equals the selected text without any 🎤, and `Phone` contains the phonetics in the same per-line format
+
+#### Scenario: Phonetics one per line
+- **WHEN** an audio-mode extraction's Youdao lookup returns both UK and US phonetics
+- **THEN** `Phone` is `UK /…/<br>US /…/` — one phonetic per line, never a space-joined single line
+
+#### Scenario: Single-region phonetics stay single-line
+- **WHEN** an audio-mode extraction's Youdao lookup returns only one region's phonetics (e.g. UK only)
+- **THEN** `Phone` is that single phonetic with no separator
 
 #### Scenario: Mic decoration is speaking-only
 - **WHEN** the user extracts a selection in Reading, Writing, or Listening mode

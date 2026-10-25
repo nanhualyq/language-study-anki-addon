@@ -144,9 +144,15 @@ class PhoneticsTests(unittest.TestCase):
             res = lookup("ephemeral")
         self.assertEqual([r for r, _ in res.phonetics], ["UK", "US"])
 
-    def test_format_phonetics_flutter_parity(self):
+    def test_format_phonetics_one_per_line(self):
         s = format_phonetics([("UK", "a"), ("US", "b")])
-        self.assertEqual(s, "UK /a/ US /b/")
+        self.assertEqual(s, "UK /a/<br>US /b/")
+
+    def test_format_phonetics_single_region_no_separator(self):
+        self.assertEqual(format_phonetics([("UK", "a")]), "UK /a/")
+
+    def test_format_phonetics_empty(self):
+        self.assertEqual(format_phonetics([]), "")
 
     def test_no_phonetics_when_absent(self):
         with patch_response(EXPAND_EC):
