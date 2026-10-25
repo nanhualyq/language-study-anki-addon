@@ -27,11 +27,11 @@ The system SHALL provide a bare `a` key shortcut in the practice dialog that sen
 
 ### Requirement: Prefilled note content
 For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior, plus the Speaking mic decoration):
-- **Reading** → note type `@Basic`: `Front` = source context (up to 3 lines above, `<br>`-terminated) with the selection wrapped in `<mark>` + hidden timestamp; `Back` = Youdao dictionary definition, falling back to the translation line at the selected index, else empty.
-- **Writing** → note type `@Basic`: selection is made on the **translation** text; `Front` = translation-line context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
-- **Listening** → note type `@EnListen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics with **one phonetic per line**, `<br>`-separated (i.e. `UK /…/<br>US /…/`; empty on lookup failure).
-- **Speaking** → note type `@EnSpeak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics per-line as above.
-- All types also carry `Title` (article title) and `Url` (article URL or empty). Audio types additionally carry `Phone`.
+- **Reading** → note type `LSA-ReadWrite`: `Front` = source context (up to 3 lines above, `<br>`-terminated) with the selection wrapped in `<mark>` + hidden timestamp; `Back` = Youdao dictionary definition, falling back to the translation line at the selected index, else empty.
+- **Writing** → note type `LSA-ReadWrite`: selection is made on the **translation** text; `Front` = translation-line context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
+- **Listening** → note type `LSA-Listen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics with **one phonetic per line**, `<br>`-separated (i.e. `UK /…/<br>US /…/`; empty on lookup failure).
+- **Speaking** → note type `LSA-Speak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics per-line as above.
+- All types also carry `Title` (article title), `Url` (article URL or empty), and `Cover` (the source article's `Cover` value, or empty when the article carries no `Cover` value). Audio types additionally carry `Phone`.
 All inter-line separators in field values SHALL be `<br>` tags, never raw newlines.
 
 #### Scenario: Reading extraction with dictionary result
@@ -78,6 +78,15 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 #### Scenario: Whole-line selection extracts
 - **WHEN** the user selects an entire line (selection endpoints at the line's boundaries) and presses `a`
 - **THEN** extraction proceeds with start=0 and end=line length
+
+#### Scenario: Cover copied from the article
+- **WHEN** the user extracts a selection from an article whose `Cover` field holds a value
+- **THEN** the constructed note's `Cover` field equals the article's `Cover` value, in every mode, alongside `Title` and `Url`
+
+#### Scenario: Article without a Cover value
+- **WHEN** the user extracts a selection from an article that carries no `Cover` field or an empty one
+- **THEN** the constructed note's `Cover` field is empty and extraction proceeds normally
+
 ### Requirement: Dictionary lookup failure tolerance
 The system SHALL treat Youdao lookup network failures and timeouts as empty results and SHALL NOT surface errors that interrupt extraction.
 

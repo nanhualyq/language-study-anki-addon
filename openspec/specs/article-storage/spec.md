@@ -18,7 +18,7 @@ The system SHALL represent an article as an Anki note of an addon-provisioned `L
 - **THEN** the `Translation` and `Url` fields are stored as empty strings
 
 ### Requirement: Auto-provisioning of note types and deck
-The system SHALL provision its note types and decks in two stages, each gated by user confirmation. At profile open, when the `LSA-Article` note type is missing, the system SHALL show one confirmation dialog listing exactly the missing items and create them only when the user accepts. At extraction time, when the extract target note types (`@Basic`, `@EnListen`, `@EnSpeak`) or target deck (`English`) are missing, the system SHALL show the same kind of confirmation before creating them, and declining cancels the extraction. Existing note types and decks SHALL be adopted by exact name when present, and provisioning SHALL be idempotent. The system SHALL NOT create or require a dedicated article deck.
+The system SHALL provision its note types and decks in two stages, each gated by user confirmation. At profile open, when the `LSA-Article` note type is missing, the system SHALL show one confirmation dialog listing exactly the missing items and create them only when the user accepts. At extraction time, when the extract target note types (`LSA-ReadWrite`, `LSA-Listen`, `LSA-Speak`) or target deck (`English`) are missing, the system SHALL show the same kind of confirmation before creating them, and declining cancels the extraction. Existing note types and decks SHALL be adopted by exact name when present, and provisioning SHALL be idempotent. The system SHALL NOT create or require a dedicated article deck.
 
 #### Scenario: First use on a clean collection
 - **WHEN** the user opens a profile for the first time in a collection lacking the `LSA-Article` note type
@@ -45,8 +45,19 @@ The system SHALL provision its note types and decks in two stages, each gated by
 - **THEN** provisioning proceeds automatically without displaying any confirmation dialog
 
 #### Scenario: Existing note types are adopted
-- **WHEN** the collection already contains note types named `@Basic`, `@EnListen`, or `@EnSpeak`, or decks named `English`
+- **WHEN** the collection already contains note types named `LSA-ReadWrite`, `LSA-Listen`, or `LSA-Speak`, or decks named `English`
 - **THEN** the system uses those existing note types and decks instead of creating duplicates
+
+### Requirement: Legacy extract note types are never adopted
+The system SHALL recognize and provision the extract target note types exclusively under the names `LSA-ReadWrite`, `LSA-Listen`, and `LSA-Speak`. Pre-existing note types carrying the legacy names (`@Basic`, `@EnListen`, `@EnSpeak`) SHALL be left untouched: the system SHALL NOT rename them, adopt them, or migrate their notes, and any collection containing only legacy types SHALL be treated as missing the extract targets.
+
+#### Scenario: Collection has only legacy extract types
+- **WHEN** the user extracts from a collection that contains note types named `@Basic`, `@EnListen`, or `@EnSpeak` but not the corresponding `LSA-*` types
+- **THEN** the extraction-time confirmation lists the missing `LSA-*` note types, and accepting creates them without renaming or modifying the legacy note types
+
+#### Scenario: Legacy notes stay on legacy types
+- **WHEN** the user extracts after the `LSA-*` types have been provisioned in a collection that previously held notes on the legacy types
+- **THEN** the new note is created on the `LSA-*` note type, and the legacy notes remain attached to their legacy note types unchanged
 
 ### Requirement: Articles never enter the review queue
 The system SHALL ensure each article note's generated card is suspended at creation time, so articles never appear during study. Article residence in any particular deck SHALL NOT be required or enforced.

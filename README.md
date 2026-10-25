@@ -13,7 +13,7 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
   Url + four progress fields), cards auto-suspended so articles never enter
   the review queue. Note types are created on demand after a one-time
   confirmation — the `LSA-Article` type at profile open, the extract types
-  (`@Basic`/`@EnListen`/`@EnSpeak`) and deck `English` on first extraction —
+  (`LSA-ReadWrite`/`LSA-Listen`/`LSA-Speak`) and deck `English` on first extraction —
   and existing types/decks are adopted by name when they already exist.
 - **Browser-native entry** — right-click an `Article` note →
   `Practice: Reading / Speaking / Listening / Writing`.
@@ -25,10 +25,13 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
 
   | Mode | Note type | Front | Back | Phone |
   |---|---|---|---|---|
-  | Reading | `@Basic` | source + `<mark>` | Youdao definition (fallback: translation line) | — |
-  | Writing | `@Basic` | **translation** + `<mark>` | source line at same index | — |
-  | Listening | `@EnListen` | source, selection masked as `???` | selected text | phonetics |
-  | Speaking | `@EnSpeak` | source + `<mark>🎤…🎤</mark>` (mic marks the selection) | selected text | phonetics |
+  | Reading | `LSA-ReadWrite` | source + `<mark>` | Youdao definition (fallback: translation line) | — |
+  | Writing | `LSA-ReadWrite` | **translation** + `<mark>` | source line at same index | — |
+  | Listening | `LSA-Listen` | source, selection masked as `???` | selected text | phonetics |
+  | Speaking | `LSA-Speak` | source + `<mark>🎤…🎤</mark>` (mic marks the selection) | selected text | phonetics |
+
+  Every extract also carries the source article's `Title`, `Url`, and `Cover`
+  values (`Cover` is empty when the article carries none).
 
 - **Progress = extract-only** — four separate fields, monotonic, written only
   when an extract opens the Add dialog (never on scroll or dialog close).

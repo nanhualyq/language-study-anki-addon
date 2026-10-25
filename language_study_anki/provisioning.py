@@ -5,7 +5,7 @@ Two stages, each gated by a user confirmation (the UI layer in
 ``provisioning_ui`` asks before calling in):
 
   article — ``LSA-Article`` note type, offered at profile open
-  extract — ``@Basic``/``@EnListen``/``@EnSpeak`` + deck ``English``,
+  extract — ``LSA-ReadWrite``/``LSA-Listen``/``LSA-Speak`` + deck ``English``,
             offered at extraction time
 
 Resolve-by-name first (adopt existing), create only when missing. No
@@ -17,8 +17,10 @@ from __future__ import annotations
 
 ARTICLE_NOTE_TYPE = "LSA-Article"
 EXTRACT_DECK = "English"
-EXTRACT_NOTE_TYPES = ["@Basic", "@EnListen", "@EnSpeak"]
-EXTRACT_FIELD_NAMES = ["Front", "Back", "Title", "Url"]
+EXTRACT_NOTE_TYPES = ["LSA-ReadWrite", "LSA-Listen", "LSA-Speak"]
+# ``Cover`` is user-maintained on LSA-Article and copied into each extract;
+# it is addon-provisioned on the extract types (added to adopted types too).
+EXTRACT_FIELD_NAMES = ["Front", "Back", "Title", "Url", "Cover"]
 ARTICLE_FIELDS = [
     "Title",
     "Content",
@@ -30,7 +32,7 @@ ARTICLE_FIELDS = [
     "ProgWriting",
 ]
 # Audio extract types carry an extra phonetics field (reference behavior).
-AUDIO_EXTRACT_NOTE_TYPES = ("@EnListen", "@EnSpeak")
+AUDIO_EXTRACT_NOTE_TYPES = ("LSA-Listen", "LSA-Speak")
 
 
 def required_extract_fields(name: str) -> list[str]:
@@ -40,10 +42,10 @@ def required_extract_fields(name: str) -> list[str]:
     return fields
 # Extraction target per practice mode (spec: practice-extract).
 MODE_NOTETYPE = {
-    "reading": "@Basic",
-    "writing": "@Basic",
-    "listening": "@EnListen",
-    "speaking": "@EnSpeak",
+    "reading": "LSA-ReadWrite",
+    "writing": "LSA-ReadWrite",
+    "listening": "LSA-Listen",
+    "speaking": "LSA-Speak",
 }
 
 
@@ -79,9 +81,9 @@ def ensure_article_notetype(col) -> dict:
 
 def ensure_extract_notetype(col, name: str) -> dict:
     """Resolve-by-name, create if missing — and guarantee the spec'd field
-    set (Front/Back/Title/Url): an adopted foreign note type may lack fields
-    the extract flow writes (evidence: decoy @EnSpeak without 'Back' raised
-    KeyError). Additive only — never removes or renames user fields."""
+    set (Front/Back/Title/Url/Cover): an adopted foreign note type may lack
+    fields the extract flow writes (evidence: decoy LSA-Speak without 'Back'
+    raised KeyError). Additive only — never removes or renames user fields."""
     mm = col.models
     model = mm.by_name(name) or _create_extract_model(mm, name)
     existing = {f["name"] for f in model["flds"]}

@@ -25,26 +25,73 @@ TRANS12 = [f"用于滚动测试的第{i}行源句。" for i in range(1, 41)]
 # ---------------------------------------------------------------- fixtures
 
 
+COVER_VALUE = "cover-selftest.jpg"
+
+
+def _ensure_article_cover_field(col) -> bool:
+    """Add the user-maintained Cover field to LSA-Article if absent.
+
+    The addon does NOT provision Cover on articles (proposal: it is user-
+    maintained); simulate the user's collection here so extraction has a
+    source value to copy. Returns True when the field exists afterwards.
+    """
+    mm = col.models
+    model = mm.by_name(provisioning.ARTICLE_NOTE_TYPE)
+    if model is None:
+        return False
+    if not any(f["name"] == "Cover" for f in model["flds"]):
+        mm.add_field(model, mm.new_field("Cover"))
+        if hasattr(mm, "update_dict"):
+            mm.update_dict(model)
+    return True
+
+
 def _ensure_long_article(col) -> int:
     from .storage import field_to_lines
 
+    model = provisioning.ensure_article_notetype(col)  # idempotent
+    _ensure_article_cover_field(col)
     found = col.find_notes('Title:"LSA long article"')
     if found:
         nid = next(iter(found))
         note = col.get_note(nid)
-        # Refresh if the fixture predates a line-count change (must exceed
-        # the viewport for scroll-restore to be observable).
-        if len(field_to_lines(note["Content"])) != len(LINES12):
-            note["Content"] = lines_to_field(LINES12)
-            note["Translation"] = lines_to_field(TRANS12)
-            note.flush()
-        return nid
-    model = provisioning.ensure_article_notetype(col)
+        try:
+            # Refresh if the fixture predates a line-count change (must exceed
+            # the viewport for scroll-restore to be observable).
+            if len(field_to_lines(note["Content"])) != len(LINES12):
+                note["Content"] = lines_to_field(LINES12)
+                note["Translation"] = lines_to_field(TRANS12)
+                note.flush()
+            if note["Cover"] != COVER_VALUE:
+                note["Cover"] = COVER_VALUE
+                note.flush()
+            return nid
+        except (KeyError, IndexError):
+            # Stale note predating the Cover field — drop and recreate below.
+            col.remove_notes([nid])
     note = col.new_note(model)
     note["Title"] = "LSA long article"
     note["Content"] = lines_to_field(LINES12)
     note["Translation"] = lines_to_field(TRANS12)
     note["Url"] = "https://example.com/long"
+    note["Cover"] = COVER_VALUE
+    col.add_note(note, provisioning.ensure_deck(col, provisioning.EXTRACT_DECK))
+    ensure_note_suspended(note)
+    return note.id
+
+
+def _ensure_nocover_article(col) -> int:
+    """An article carrying an empty Cover (empty-fallback extract scenario)."""
+    model = provisioning.ensure_article_notetype(col)
+    _ensure_article_cover_field(col)
+    found = col.find_notes('Title:"LSA nocover article"')
+    if found:
+        return next(iter(found))
+    note = col.new_note(model)
+    note["Title"] = "LSA nocover article"
+    note["Content"] = lines_to_field(LINES12)
+    note["Url"] = "https://example.com/nocover"
+    note["Cover"] = ""
     col.add_note(note, provisioning.ensure_deck(col, provisioning.EXTRACT_DECK))
     ensure_note_suspended(note)
     return note.id
@@ -85,7 +132,7 @@ def check_browser_menu(mw, report, done) -> None:
         col = mw.col
         art = _ensure_long_article(col)
         prov = provisioning.provision(col)
-        basic = col.new_note(prov["extract_notetypes"]["@Basic"])
+        basic = col.new_note(prov["extract_notetypes"]["LSA-ReadWrite"])
         basic["Front"] = "not an article"
         col.add_note(basic, prov["extract_deck_id"])
 
@@ -479,33 +526,66 @@ def check_tts(mw, report, done) -> None:
 
 
 EXTRACT_ROUNDS = [
-    # (mode, line, note type, required tokens in extract_log)
-    ("reading", 8, "@Basic", ["front:source", "highlight:mark", "back:"]),
-    ("listening", 10, "@EnListen",
-     ["front:source", "highlight:???", "back:selection", "phone:"]),
-    ("speaking", 12, "@EnSpeak",
-     ["front:source", "highlight:mark", "mark:mic", "back:selection", "phone:"]),
-    ("writing", 14, "@Basic",
-     ["front:translation", "back:source-line", "lookup:skipped"]),
+    # (mode, line, note type, required tokens, article key, expected Cover)
+    ("reading", 8, "LSA-ReadWrite",
+     ["front:source", "highlight:mark", "back:"], "main", COVER_VALUE),
+    ("listening", 10, "LSA-Listen",
+     ["front:source", "highlight:???", "back:selection", "phone:"],
+     "main", COVER_VALUE),
+    ("speaking", 12, "LSA-Speak",
+     ["front:source", "highlight:mark", "mark:mic", "back:selection", "phone:"],
+     "main", COVER_VALUE),
+    ("writing", 14, "LSA-ReadWrite",
+     ["front:translation", "back:source-line", "lookup:skipped"],
+     "main", COVER_VALUE),
+    # Cover empty-fallback: an article with an empty Cover extracts "".
+    ("reading", 8, "LSA-ReadWrite",
+     ["front:source"], "nocover", ""),
 ]
 
 
+def _read_add_dialog_cover(new_add_ids):
+    """Cover of the prefilled note in a freshly opened Add dialog, or a
+    sentinel explaining why it could not be read."""
+    from aqt.qt import QApplication
+
+    if not new_add_ids:
+        return None
+    target = next(
+        (w for w in QApplication.topLevelWidgets() if id(w) in new_add_ids), None
+    )
+    if target is None:
+        return "<no-add-dialog>"
+    ed_note = getattr(getattr(target, "editor", None), "note", None)
+    if ed_note is None:
+        return "<no-editor-note>"
+    try:
+        return ed_note["Cover"]
+    except (KeyError, IndexError):
+        return "<missing>"
+
+
 def check_extract_all_modes(mw, report, done) -> None:
-    """Tasks 5.4 + 5.5 + 3.2 across ALL four modes.
+    """Tasks 5.4 + 5.5 + 3.2 across ALL four modes (+ Cover copy/fallback).
 
     Per mode: capture selection (fails fast — the reported 'other modes do
     nothing' bug), fire `a`, assert the Add dialog opened, the mode's
     progress advanced to the extract line, the per-mode note type was used,
-    and no error hit the extract log.
+    the article's Cover was copied into the prefilled note, and no error hit
+    the extract log.
     """
     from .practice_dialog import open_dialog
     from .progress import PROGRESS_FIELDS
     from aqt.qt import QApplication
 
     col = mw.col
-    art = _ensure_long_article(col)
-    for s in PROGRESS_FIELDS:
-        _set_progress_raw(col, art, s, 0)
+    articles = {
+        "main": _ensure_long_article(col),        # article carries Cover
+        "nocover": _ensure_nocover_article(col),  # article Cover is empty
+    }
+    for aid in articles.values():
+        for s in PROGRESS_FIELDS:
+            _set_progress_raw(col, aid, s, 0)
     result = report["detail"] = {"rounds": []}
 
     fire_js = (
@@ -522,10 +602,14 @@ def check_extract_all_modes(mw, report, done) -> None:
         } - baseline
 
     def finalize():
-        note = col.get_note(art)
+        note = col.get_note(articles["main"])
         final = {s: get_progress(note, s) for s in PROGRESS_FIELDS}
         result["final_progress"] = final
-        expected = {m: ln for m, ln, _, _ in EXTRACT_ROUNDS}
+        # Progress assertions only track the rounds run against the main
+        # article; the Cover fallback round runs on a separate article.
+        expected = {
+            m: ln for m, ln, _, _, key, _ in EXTRACT_ROUNDS if key == "main"
+        }
         report["ok"] = all(r.get("ok") for r in result["rounds"]) and all(
             final[s] == expected[s] for s in expected
         )
@@ -535,14 +619,16 @@ def check_extract_all_modes(mw, report, done) -> None:
         if i >= len(EXTRACT_ROUNDS):
             finalize()
             return
-        mode, line, nt, required = EXTRACT_ROUNDS[i]
+        mode, line, nt, required, art_key, expect_cover = EXTRACT_ROUNDS[i]
         state = {
             "mode": mode,
             "line": line,
             "nt": nt,
             "required": required,
+            "art_id": articles[art_key],
+            "expect_cover": expect_cover,
             "round": i,
-            "dlg": open_dialog(None, art, mode),
+            "dlg": open_dialog(None, articles[art_key], mode),
             "baseline": {
                 id(w)
                 for w in QApplication.topLevelWidgets()
@@ -591,13 +677,15 @@ def check_extract_all_modes(mw, report, done) -> None:
     def verify(state):
         new_add = visible_adds(state["baseline"])
         state["add_opened"] = bool(new_add)
-        note = col.get_note(art)
+        note = col.get_note(state["art_id"])
         state["progress"] = get_progress(note, state["mode"])
         state["extract_log"] = list(getattr(state["dlg"], "extract_log", []))
+        state["cover"] = _read_add_dialog_cover(new_add)
         state["ok"] = (
             bool(new_add)
             and state["progress"] == state["line"]
             and f"note_type:{state['nt']}" in state["extract_log"]
+            and state["cover"] == state["expect_cover"]
             and not any("ERR:" in e for e in state["extract_log"])
             and all(
                 tok in " | ".join(state["extract_log"])
@@ -610,8 +698,8 @@ def check_extract_all_modes(mw, report, done) -> None:
         entry = {
             k: state[k]
             for k in (
-                "mode", "line", "add_opened", "progress",
-                "extract_log", "python_sel", "ok", "fail",
+                "mode", "line", "add_opened", "progress", "cover",
+                "expect_cover", "extract_log", "python_sel", "ok", "fail",
             )
             if k in state
         }

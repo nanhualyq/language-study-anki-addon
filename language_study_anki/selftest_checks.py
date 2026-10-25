@@ -87,11 +87,11 @@ def check_provision_and_adopt(mw, report, done) -> None:
         col = mw.col
         mm = col.models
 
-        # Plant a pre-existing @EnSpeak with a marker field (fresh bases only)
+        # Plant a pre-existing LSA-Speak with a marker field (fresh bases only)
         # so provisioning must ADOPT it instead of duplicating.
         decoy_planted = False
-        if mm.by_name("@EnSpeak") is None:
-            model = mm.new("@EnSpeak")
+        if mm.by_name("LSA-Speak") is None:
+            model = mm.new("LSA-Speak")
             # Full extract field set + a marker: adoption must preserve the
             # marker, and the extract flow needs Front/Back/Title/Url.
             for field in provisioning.EXTRACT_FIELD_NAMES + ["AdoptedMarker"]:
@@ -113,7 +113,7 @@ def check_provision_and_adopt(mw, report, done) -> None:
         )
         duplicates = {n: counts.get(n, 0) for n in targets if counts.get(n, 0) != 1}
 
-        adopted = mm.by_name("@EnSpeak")
+        adopted = mm.by_name("LSA-Speak")
         has_marker = any(
             f["name"] == "AdoptedMarker" for f in adopted["flds"]
         ) or not decoy_planted  # marker absent only OK if it pre-existed before us
@@ -127,7 +127,9 @@ def check_provision_and_adopt(mw, report, done) -> None:
             )
         )
         article_fields = [f["name"] for f in p1["article_notetype"]["flds"]]
-        fields_ok = article_fields == provisioning.ARTICLE_FIELDS
+        # All provisioned article fields must be present; extra user/selftest
+        # fields (e.g. the user-maintained Cover) are additive and allowed.
+        fields_ok = set(provisioning.ARTICLE_FIELDS) <= set(article_fields)
         sort_ok = p1["article_notetype"]["sortf"] == 0
 
         report["ok"] = not duplicates and has_marker and same_ids and fields_ok and sort_ok
@@ -288,7 +290,7 @@ def check_add_dialog_set_note(mw, report, done) -> None:
 
         col = mw.col
         prov = provisioning.provision(col)
-        model = prov["extract_notetypes"]["@Basic"]
+        model = prov["extract_notetypes"]["LSA-ReadWrite"]
 
         note = col.new_note(model)
         import time as _time

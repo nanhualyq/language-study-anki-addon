@@ -161,11 +161,11 @@ class BuildMenuLabelsTests(unittest.TestCase):
 
     def test_mixed_selection_returns_none(self):
         art = FakeNote(content=content_of(40))
-        basic = FakeNote(content="x", note_type_name="@Basic")
+        basic = FakeNote(content="x", note_type_name="LSA-ReadWrite")
         self.assertIsNone(build_menu_labels([1, 2], FakeCol({1: art, 2: basic})))
 
     def test_non_article_selection_returns_none(self):
-        basic = FakeNote(content="x", note_type_name="@Basic")
+        basic = FakeNote(content="x", note_type_name="LSA-ReadWrite")
         self.assertIsNone(build_menu_labels([1], FakeCol({1: basic})))
 
     def test_empty_selection_returns_none(self):

@@ -2,10 +2,13 @@
 
 Ports the reference app's per-mode extract behavior without AnkiConnect:
 
-  reading   @Basic      Front=source ctx + <mark>   Back=youdao/translation
-  writing   @Basic      Front=TRANSLATION ctx+<mark> Back=source line (no lookup)
-  listening @EnListen   Front=source ctx, sel→???    Back=selected  Phone=phonetics
-  speaking  @EnSpeak    Front=source ctx + <mark>    Back=selected  Phone=phonetics
+  reading   LSA-ReadWrite  Front=source ctx + <mark>   Back=youdao/translation
+  writing   LSA-ReadWrite  Front=TRANSLATION ctx+<mark> Back=source line (no lookup)
+  listening LSA-Listen     Front=source ctx, sel→???    Back=selected  Phone=phonetics
+  speaking  LSA-Speak      Front=source ctx + <mark>    Back=selected  Phone=phonetics
+
+Every extract also carries the article's Title, Url, and Cover (empty when
+the article carries no Cover value).
 
 The extract-time progress write is the ONLY progress write path (D8).
 """
@@ -26,6 +29,20 @@ _AUDIO_MODES = ("listening", "speaking")
 # (spec: practice-extract, "Prefilled note content" / Speaking).
 _SPEAKING_MARK_PREFIX = "🎤"
 _SPEAKING_MARK_SUFFIX = "🎤"
+
+
+def _article_value(article, name: str) -> str:
+    """Defensive article field read — empty string when the field is absent.
+
+    ``Cover`` is user-maintained on ``LSA-Article`` and does not exist on a
+    freshly provisioned collection, so a missing field must yield ``""``
+    rather than raise (spec: practice-extract → "Article without a Cover
+    value").
+    """
+    try:
+        return article[name] or ""
+    except KeyError:
+        return ""
 
 
 def _log(dialog, msg: str) -> None:
@@ -178,6 +195,7 @@ def _open_add_dialog(dialog, sel: dict, result) -> None:
         ("Back", back),
         ("Title", article["Title"]),
         ("Url", article["Url"] or ""),
+        ("Cover", _article_value(article, "Cover")),
     ]
     if mode in _AUDIO_MODES:
         field_values.append(("Phone", phone))
