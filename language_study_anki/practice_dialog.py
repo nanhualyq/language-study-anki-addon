@@ -9,6 +9,7 @@ never write (decision D8): the dialog only READS the mode's progress field.
 from __future__ import annotations
 
 import json
+import os
 import traceback
 
 from aqt.qt import QDialog, QVBoxLayout
@@ -29,6 +30,23 @@ MODE_LABELS = {
 
 # Set/kept by open(); prevents GC and duplicate windows per note+mode.
 _open: dict[tuple[int, str], "PracticeDialog"] = {}
+
+# The practice-dialog UI template. Read once at import (D1 in change
+# extract-practice-html-template): a missing file is a deploy error and
+# should fail loudly at Anki startup, not on first click.
+# CONTRACT with web/practice.html (keep both ends in sync):
+#   Placeholders replaced before setHtml: __MODE__, __LSA_DATA__
+#   Bridge commands (JS -> Python via pycmd): lsa:sel:<json|null>,
+#     lsa:extract, lsa:play:<n>
+#   Callback (Python -> JS): window.markLearnedUpTo(n)
+_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "web", "practice.html")
+try:
+    with open(_TEMPLATE_PATH, encoding="utf-8") as _f:
+        _HTML = _f.read()
+except FileNotFoundError as e:
+    raise FileNotFoundError(
+        f"language_study_anki: practice template not found: {_TEMPLATE_PATH}"
+    ) from e
 
 
 def open_dialog(parent, note_id: int, mode: str) -> "PracticeDialog":
@@ -107,6 +125,8 @@ class PracticeDialog(QDialog):
         super().closeEvent(event)
 
     # -- bridge --------------------------------------------------------
+    # JS side lives in web/practice.html; commands must match the contract
+    # comment at _TEMPLATE_PATH above (lsa:sel:, lsa:extract, lsa:play:<n>).
     def _on_bridge(self, cmd: str) -> None:
         log = getattr(self, "bridge_log", None)
         if log is None:
@@ -143,222 +163,3 @@ class PracticeDialog(QDialog):
                 QApplication.beep()
             except Exception:
                 pass
-
-
-_HTML = r"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
-#toolbar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #ddd;
-  padding: 8px 14px; display: flex; gap: 12px; align-items: center; z-index: 5; }
-#toolbar .field { color: #888; font-size: 12px; }
-.line { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start;
-  border-bottom: 1px solid #f0f0f0; }
-/* Learned rows: light gray background band instead of reduced opacity.
-   Opacity is a subtractive signal — in Listening mode a closed row has
-   almost nothing to fade — and it would also dim this row's own tint. */
-.line.learned { background: #f1f1f2; }
-/* Per-row disclosure control (HTML <details>-style). The ONLY way to reveal
-   hidden per-line content: clicking the row itself never toggles anything,
-   so selecting/clicking text can no longer hide the line by accident. */
-.twisty { flex: 0 0 auto; width: 28px; margin-top: 1px; padding: 0; border: 0;
-  background: transparent; color: #888; font-size: 20px; line-height: 1.25;
-  text-align: center; cursor: pointer; border-radius: 4px; }
-.twisty:hover { color: #333; background: #ececec; }
-.twisty.ghost { visibility: hidden; cursor: default; }
-.line.open .twisty { color: #444; }
-.play { flex: 0 0 auto; border: 1px solid #bbb; background: #fff; border-radius: 4px;
-  cursor: pointer; padding: 2px 8px; font-size: 12px; }
-.body { flex: 1 1 auto; min-width: 0; }
-.primary { white-space: pre-wrap; line-height: 1.5; }
-.secondary { display: none; color: #666; font-size: 13px; margin-top: 3px;
-  white-space: pre-wrap; line-height: 1.5; }
-.ln { flex: 0 0 34px; text-align: right; color: #bbb; font-size: 11px; padding-top: 3px; }
-.empty { padding: 60px 20px; text-align: center; color: #888; font-size: 18px; }
-/* mode rules */
-body.mode-listening .primary { display: none; }
-body.mode-listening .line.open .primary { display: block; }
-body.mode-speaking .primary { display: block; }
-body.mode-reading .primary { display: block; }
-body.mode-writing .primary { display: block; }
-body.mode-writing .line .secondary.source { display: none; }
-/* What a row's twisty reveals, per mode. */
-body.mode-reading .line.open .secondary,
-body.mode-speaking .line.open .secondary { display: block; }
-body.mode-writing .line.open .secondary.source { display: block; }
-/* Hint lives in the toolbar's right end (not floating over the article);
-   kbd renders the shortcut as a keycap, distinct from plain text. */
-#toolbar .hint { margin-left: auto; color: #aaa; font-size: 11px; white-space: nowrap; }
-#toolbar kbd { display: inline-block; padding: 1px 5px; border: 1px solid #ccc;
-  border-bottom-width: 2px; border-radius: 3px; background: #f7f7f7;
-  font-family: inherit; font-size: 10px; color: #555; }
-</style></head>
-<body class="mode-__MODE__">
-<div id="toolbar">
-  <strong id="mode-name">__MODE__</strong>
-  <span class="field" id="pf"></span>
-  <span class="hint">select text &amp; press <kbd>a</kbd> to extract</span>
-</div>
-<div id="app"></div>
-<script>
-const D = __LSA_DATA__;
-/* Progress counter: <learned>/<total>, clamped so it can never exceed the
-   article (stored progress can outlive a shortened article). */
-function setCounter(){
-  document.getElementById('pf').textContent =
-    Math.min(D.progress || 0, D.lines.length) + '/' + D.lines.length;
-}
-setCounter();
-
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-const hasTrans = D.translations.length > 0;
-const showPlay = D.mode === 'listening' || D.mode === 'speaking';
-
-const app = document.getElementById('app');
-if (D.lines.length === 0) {
-  app.innerHTML = '<div class="empty">Article content is empty</div>';
-} else {
-  const learnedTo = Math.min(D.progress || 0, D.lines.length);
-  let html = '';
-  for (let i = 1; i <= D.lines.length; i++) {
-    const src = D.lines[i-1];
-    const tr = D.translations[i-1] || '';
-    let main;
-    if (D.mode === 'writing' && hasTrans) {
-      /* Flutter parity: selection targets the TRANSLATION; the revealed
-         source line is view-only. */
-      main = '<div class="primary sel-area">' + esc(tr) + '</div>' +
-             '<div class="secondary source">' + esc(src) + '</div>';
-    } else {
-      main = '<div class="primary sel-area">' + esc(src) + '</div>' +
-             '<div class="secondary">' + esc(tr) + '</div>';
-    }
-    /* Text hidden by default in this mode — what the row's twisty reveals.
-       Rows with nothing hidden get an invisible placeholder so every line
-       keeps the same indent. */
-    const hidden = D.mode === 'listening' ? src
-                 : D.mode === 'writing' ? (hasTrans ? src : '')
-                 : tr;
-    const twisty = hidden.length > 0
-      ? '<button class="twisty" data-twisty="' + i + '" aria-expanded="false"' +
-        ' title="Show / hide hidden text">&#9656;</button>'
-      : '<span class="twisty ghost"></span>';
-    html += '<div class="line' + (i <= learnedTo ? ' learned' : '') +
-            '" data-line="' + i + '">' +
-            twisty +
-            (showPlay ? '<button class="play" data-play="' + i + '">&#9654;</button>' : '') +
-            '<div class="body">' + main + '</div>' +
-            '<div class="ln">' + i + '</div></div>';
-  }
-  app.innerHTML = html;
-  // Restore scroll: retry — QWebEngine may not have a scrollable range yet
-  // when the script first runs (dialog still laying out), which silently
-  // no-ops scrollTo.
-  if (learnedTo > 0) {
-    let tries = 0;
-    (function tryScroll(){
-      const row = app.querySelector('[data-line="' + learnedTo + '"]');
-      if (row) window.scrollTo(0, Math.max(0, row.offsetTop - 60));
-      const at = window.scrollY || document.scrollingElement.scrollTop || 0;
-      if (at === 0 && tries++ < 25) setTimeout(tryScroll, 100);
-    })();
-  }
-}
-
-/* Live learned-style update after an extract (Python owns the write; this
-   reflects the new progress immediately instead of on next open). */
-window.markLearnedUpTo = function(n){
-  for (let i = 1; i <= n && i <= D.lines.length; i++) {
-    const r = app.querySelector('[data-line="' + i + '"]');
-    if (r) r.classList.add('learned');
-  }
-  D.progress = Math.max(D.progress || 0, n);
-  setCounter();
-};
-
-/* Single reveal mechanism for all four modes: a per-row twisty button.
-   `open` on the row is the only thing CSS keys off (see mode rules above). */
-function setOpen(row, on){
-  row.classList.toggle('open', on);
-  const t = row.querySelector('[data-twisty]');
-  if (t) {
-    t.setAttribute('aria-expanded', on ? 'true' : 'false');
-    t.innerHTML = on ? '&#9662;' : '&#9656;';
-  }
-}
-
-app.addEventListener('click', function(e){
-  const t = e.target.closest('[data-twisty]');
-  if (t) {
-    const row = t.closest('.line');
-    setOpen(row, !row.classList.contains('open'));
-    return;
-  }
-  const p = e.target.closest('[data-play]');
-  if (p) { pycmd('lsa:play:' + p.dataset.play); return; }
-  /* Everything else is a no-op: clicking a row (or its text) must NEVER
-     show/hide content — it only starts selections. Reveal/tuck away is the
-     twisty button's job alone. */
-});
-
-/* ---- selection capture (single-line, within a .sel-area) ---- */
-function sendSel(obj){
-  pycmd('lsa:sel:' + (obj ? JSON.stringify(obj) : 'null'));
-}
-function computeSel(){
-  const s = window.getSelection();
-  if (!s || s.isCollapsed || s.rangeCount === 0) return null;
-  const r = s.getRangeAt(0);
-  let el = r.commonAncestorContainer;
-  if (el.nodeType === 3) el = el.parentElement;
-  /* Row first: a whole-line selection can put range endpoints on the row
-     element itself (or the line-number chrome), which made closest('.sel-area')
-     fail and whole-line extraction impossible. */
-  const row = el.closest ? el.closest('.line') : null;
-  if (!row) return null;
-  const area = row.querySelector('.sel-area');
-  if (!area) return null;
-  const full = document.createRange();
-  full.selectNodeContents(area);
-  const areaLen = area.textContent.length;
-  let start = 0, end = areaLen;
-  if (area.contains(r.startContainer)) {
-    const a = full.cloneRange();
-    a.setEnd(r.startContainer, r.startOffset);
-    start = a.toString().length;
-  }
-  if (area.contains(r.endContainer)) {
-    const b = full.cloneRange();
-    b.setEnd(r.endContainer, r.endOffset);
-    end = b.toString().length;
-  }
-  if (end <= start) return null;
-  let text = area.textContent.substring(start, end);
-  /* Chromium's word-granularity (double-click) selection swallows the space
-     AFTER a word ("brown " → offsets 10..16, verified); Flutter's word
-     boundary selects the word only. Shrink the RANGE itself — not just the
-     text — so start/end stay consistent with the stored text and the <mark>
-     highlight. A selection that is all whitespace collapses to null
-     (Flutter parity: practice_line_item.dart `trim().isEmpty` guard). */
-  let i = 0, j = text.length;
-  while (i < j && /\s/.test(text.charAt(i))) i += 1;
-  while (j > i && /\s/.test(text.charAt(j - 1))) j -= 1;
-  if (j <= i) return null;
-  start += i;
-  end = start + (j - i);
-  text = text.substring(i, j);
-  return {line: +row.dataset.line, start: start, end: end, text: text};
-}
-document.addEventListener('selectionchange', function(){
-  sendSel(computeSel());
-});
-
-/* ---- bare `a` extract shortcut (no modifiers) ---- */
-document.addEventListener('keydown', function(e){
-  if ((e.key === 'a' || e.key === 'A') &&
-      !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-    e.preventDefault();
-    pycmd('lsa:extract');
-  }
-});
-</script>
-</body></html>"""
