@@ -12,7 +12,7 @@ import json
 import os
 import traceback
 
-from aqt.qt import QDialog, QVBoxLayout
+from aqt.qt import QDialog, Qt, QVBoxLayout
 
 from . import tts
 from .progress import get_progress, progress_field
@@ -91,6 +91,14 @@ class PracticeDialog(QDialog):
         progress = get_progress(note, mode)
 
         self.setWindowTitle(f"{MODE_LABELS[mode]} — {note['Title']}")
+        # Qt::Dialog windows get no min/max caption buttons on Windows
+        # (WS_MINIMIZEBOX/WS_MAXIMIZEBOX absent). Same pattern as Anki's own
+        # aqt/models.py dialog. Set before show() (D2 in design.md).
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.resize(920, 720)
         layout = QVBoxLayout(self)
 

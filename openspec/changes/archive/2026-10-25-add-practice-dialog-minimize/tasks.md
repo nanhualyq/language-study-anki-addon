@@ -1,0 +1,17 @@
+## 1. Implement the window flags
+
+- [x] 1.1 In `language_study_anki/practice_dialog.py`, set `Qt.WindowType.WindowMinimizeButtonHint` and `Qt.WindowType.WindowMaximizeButtonHint` on the dialog's window flags inside `PracticeDialog.__init__` (before `show()`), and verify the dialog still constructs and displays normally in a scratch instance (`tools/scratch-anki.sh`, open any article's Practice: Reading)
+
+## 2. Verify caption controls and state preservation
+
+- [x] 2.1 In the scratch instance, verify the practice dialog caption now shows minimize and maximize buttons and that the Win32 style has `WS_MINIMIZEBOX` and `WS_MAXIMIZEBOX` set (enumerate the window style the same way it was measured during exploration), and verify maximize then restore returns the dialog to its previous size with scroll position, revealed lines, and selection unchanged — **measured**: style `0x96cf0000` (`WS_MINIMIZEBOX=True`, `WS_MAXIMIZEBOX=True`; was `0x96CC0000` with both False). Maximize `[277,42,920,750]` → `[0,-7,1493,893]` (full screen), restore → `[277,42,920,750]` exact. DOM state identical before/after: revealed line open, selection `"line 3 alp"`, counter `5/12`
+- [x] 2.2 Verify window management writes no progress: note the mode's progress field before and after minimize/restore cycles, and confirm the field is unchanged and the dialog is still registered in `_open` (re-invoking the same menu item does not create a duplicate window) — **measured**: `ProgReading` seeded to 5, unchanged (5) after full maximize+minimize cycle; re-invoking `open_dialog` closed the old dialog and left exactly 1 registry entry for `(note, mode)`, no duplicate window
+
+## 3. Gating measurement: minimized-dialog recovery
+
+- [x] 3.1 Minimize the practice dialog and confirm it is restorable via a platform affordance (its own taskbar entry, or the owner Browse window's taskbar button), with the dialog returning at its previous geometry and in-dialog state intact — **if restore is not possible, stop and fall back to design decision B (`Qt.WindowType.Window` type) before proceeding**; record the observed behavior in this task's result — **observed**: dialog is an owned window without `WS_EX_APPWINDOW` → no own taskbar button. Restore paths measured: (a) activating the owner Browse window alone does NOT restore it (`owner_activated_restored_dialog=false`); (b) the owner taskbar button's minimize→restore cycle DOES restore it (`owner_restore_restored_dialog=true`); (c) Alt+Tab lists it (`WS_EX_TOOLWINDOW` absent → `alt_tab_eligible=true`). Restored at exact prior geometry `[277,42,920,750]` with selection/revealed-lines/counter intact. **Conclusion: restorable via platform affordances → decision D1 suffices; fallback to B not needed**
+
+## 4. Regression
+
+- [x] 4.1 Run the in-addon self-test suite and confirm all checks pass (the dialog remains a `QDialog`, so `selftest.py`'s QDialog-only close guard and `selftest_dialog_checks.py` isinstance checks are unaffected) — all 11 checks ok in scratch run (2026-11; `_meta` is runner metadata, not a check)
+- [x] 4.2 Confirm the extract flow still works end-to-end from the dialog (select text, press `a`, Add dialog opens) and that closing the dialog still writes no progress — **verified**: selftest `extract_all_modes` (fires `a` per mode, asserts Add dialog opened, progress advanced, per-mode note type) passed in the suite run; probe confirmed close writes no progress (`ProgReading` 5 → 5 across dialog close)

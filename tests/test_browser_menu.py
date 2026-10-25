@@ -23,6 +23,12 @@ def _stub_aqt_qt() -> None:
     qt = types.ModuleType("aqt.qt")
     qt.QDialog = type("QDialog", (), {})
     qt.QVBoxLayout = type("QVBoxLayout", (), {})
+
+    class _WindowType:  # minimal Qt.WindowType for the window-flag hints
+        WindowMinimizeButtonHint = 0x10000000
+        WindowMaximizeButtonHint = 0x01000000
+
+    qt.Qt = types.SimpleNamespace(WindowType=_WindowType)
     aqt.qt = qt
     sys.modules["aqt"] = aqt
     sys.modules["aqt.qt"] = qt
