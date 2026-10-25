@@ -111,6 +111,16 @@ class ProgressPercentTests(unittest.TestCase):
         note = FakeNote(content=None, ProgReading="4")
         self.assertEqual(_progress_percent(note, "reading"), 0)
 
+    def test_percent_uses_structural_line_count_for_edited_article(self):
+        # Anki's rich editor wraps an edited article in an outer <div> with
+        # one <div> per line (captured live: 56 lines, ProgReading 54).
+        # The parser must not count the wrapper's closing tags as trailing
+        # lines: 54/56 -> 96%, not the phantom-inflated 54/58 -> 93%.
+        body = "".join(f"<div>Source line {i}</div>" for i in range(1, 57))
+        content = f"<div>{body}</div>"
+        note = FakeNote(content=content, ProgReading="54")
+        self.assertEqual(_progress_percent(note, "reading"), 96)
+
 
 class BuildMenuLabelsTests(unittest.TestCase):
     def test_labels_carry_percent_suffixes(self):
