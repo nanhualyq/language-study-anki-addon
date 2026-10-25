@@ -48,6 +48,24 @@ class BuildFrontTests(unittest.TestCase):
         self.assertIn("<mark>???</mark>", front)
         self.assertNotIn("<mark>line 1</mark>", front)
 
+    def test_mark_prefix_suffix_decorate_selection(self):
+        # Speaking's mic cue: <mark>🎤sel🎤</mark> (spec: practice-extract).
+        front = build_front(
+            ["abc def ghi"], 1, 4, 7,
+            mark_prefix="🎤", mark_suffix="🎤", timestamp_ms=1,
+        )
+        self.assertIn("abc <mark>🎤def🎤</mark> ghi", front)
+
+    def test_mark_decoration_defaults_to_none(self):
+        # Regression: undecorated output stays byte-identical by default.
+        plain = build_front(["abc def ghi"], 1, 4, 7, timestamp_ms=1)
+        explicit = build_front(
+            ["abc def ghi"], 1, 4, 7,
+            mark_prefix="", mark_suffix="", timestamp_ms=1,
+        )
+        self.assertEqual(plain, explicit)
+        self.assertNotIn("🎤", plain)
+
     def test_selection_offsets_preserve_surroundings(self):
         front = build_front(["abc def ghi"], 1, 4, 7, timestamp_ms=1)
         self.assertIn("abc <mark>def</mark> ghi", front)

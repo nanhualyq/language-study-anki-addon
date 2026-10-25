@@ -22,12 +22,16 @@ def build_front(
     *,
     highlight_replacement: str = "",
     timestamp_ms: int | None = None,
+    mark_prefix: str = "",
+    mark_suffix: str = "",
 ) -> str:
     """Build the Front field for a selection on ``line_number`` (1-based).
 
     Layout: up to 3 context lines (each ``<br>``-terminated) + the selected
     line with ``[start:end]`` wrapped in ``<mark>`` (or replaced by
-    ``highlight_replacement``) + a hidden timestamp span keeping the field
+    ``highlight_replacement``), optionally decorated with ``mark_prefix`` /
+    ``mark_suffix`` inside the mark (speaking's 🎤 cue; empty by default) +
+    a hidden timestamp span keeping the field
     content unique (defeats duplicate detection).
     """
     if not 1 <= line_number <= len(lines):
@@ -47,7 +51,9 @@ def build_front(
     parts.append(
         html.escape(line[:start], quote=False)
         + "<mark>"
+        + mark_prefix
         + html.escape(selected, quote=False)
+        + mark_suffix
         + "</mark>"
         + html.escape(line[end:], quote=False)
     )

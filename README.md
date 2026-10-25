@@ -28,7 +28,7 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
   | Reading | `@Basic` | source + `<mark>` | Youdao definition (fallback: translation line) | — |
   | Writing | `@Basic` | **translation** + `<mark>` | source line at same index | — |
   | Listening | `@EnListen` | source, selection masked as `???` | selected text | phonetics |
-  | Speaking | `@EnSpeak` | source + `<mark>` | selected text | phonetics |
+  | Speaking | `@EnSpeak` | source + `<mark>🎤…🎤</mark>` (mic marks the selection) | selected text | phonetics |
 
 - **Progress = extract-only** — four separate fields, monotonic, written only
   when an extract opens the Add dialog (never on scroll or dialog close).

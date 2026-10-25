@@ -21,6 +21,12 @@ from .provisioning_ui import ensure_provisioned
 
 _AUDIO_MODES = ("listening", "speaking")
 
+# Speaking's Front decorates the <mark>ed selection with a mic cue so
+# speaking cards are recognizable in the browser and during review
+# (spec: practice-extract, "Prefilled note content" / Speaking).
+_SPEAKING_MARK_PREFIX = "🎤"
+_SPEAKING_MARK_SUFFIX = "🎤"
+
 
 def _log(dialog, msg: str) -> None:
     log = getattr(dialog, "extract_log", None)
@@ -119,7 +125,16 @@ def _open_add_dialog(dialog, sel: dict, result) -> None:
         kinds = "front:translation back:source-line highlight:mark"
     else:
         highlight = "???" if mode == "listening" else ""
-        front = build_front(lines, line_no, start, end, highlight_replacement=highlight)
+        mic = mode == "speaking"
+        front = build_front(
+            lines,
+            line_no,
+            start,
+            end,
+            highlight_replacement=highlight,
+            mark_prefix=_SPEAKING_MARK_PREFIX if mic else "",
+            mark_suffix=_SPEAKING_MARK_SUFFIX if mic else "",
+        )
         if mode in _AUDIO_MODES:
             back = sel["text"]
             kinds = "back:selection"
@@ -128,6 +143,7 @@ def _open_add_dialog(dialog, sel: dict, result) -> None:
             kinds = "back:youdao" if entries else "back:fallback"
         kinds = (
             "front:source highlight:" + ("???" if mode == "listening" else "mark")
+            + (" mark:mic" if mic else "")
             + " " + kinds
         )
     _log(dialog, f"fields {kinds} phone:{len(phone)}")

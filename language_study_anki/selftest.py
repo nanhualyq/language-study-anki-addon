@@ -25,6 +25,11 @@ STARTUP_WATCHDOG_MS = 90_000
 # language chooser etc.), recorded for evidence.
 _dismissed: list[str] = []
 _dismisser_active = False
+# Startup-phase indicator: the 90s startup watchdog must only cover the
+# "profile never opens" case. Once the profile is open, the _Runner's own
+# watchdogs (WATCHDOG_MS / STEP_TIMEOUT_MS) own the rest of the run — the
+# startup watchdog must not kill a suite that is merely still running.
+_profile_opened = False
 
 
 def register() -> None:
@@ -71,6 +76,8 @@ def _install_startup_dialog_dismiss() -> None:
         QTimer.singleShot(500, tick)
 
     def startup_timeout() -> None:
+        if _profile_opened:
+            return  # startup phase over; runner watchdogs cover the suite
         path = os.environ.get(RESULTS_ENV)
         if not path or os.path.exists(path):
             return  # finished (or nothing to do)
@@ -97,8 +104,9 @@ def _on_profile_open() -> None:
 
     # First-run dialog dismissal is no longer needed once the profile is open
     # (selftest steps open their own dialogs intentionally).
-    global _dismisser_active
+    global _dismisser_active, _profile_opened
     _dismisser_active = False
+    _profile_opened = True
     QTimer.singleShot(STARTUP_DELAY_MS, lambda: _Runner(os.environ[RESULTS_ENV], mw).start())
 
 

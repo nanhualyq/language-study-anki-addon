@@ -26,11 +26,11 @@ The system SHALL provide a bare `a` key shortcut in the practice dialog that sen
 - **THEN** extraction is not triggered: no Add dialog opens and no note is constructed
 
 ### Requirement: Prefilled note content
-For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior):
+For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior, plus the Speaking mic decoration):
 - **Reading** → note type `@Basic`: `Front` = source context (up to 3 lines above, `<br>`-terminated) with the selection wrapped in `<mark>` + hidden timestamp; `Back` = Youdao dictionary definition, falling back to the translation line at the selected index, else empty.
 - **Writing** → note type `@Basic`: selection is made on the **translation** text; `Front` = translation-line context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
 - **Listening** → note type `@EnListen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics formatted `UK /…/ US /…/` (empty on lookup failure).
-- **Speaking** → note type `@EnSpeak`: `Front` = source context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics as above.
+- **Speaking** → note type `@EnSpeak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics as above.
 - All types also carry `Title` (article title) and `Url` (article URL or empty). Audio types additionally carry `Phone`.
 All inter-line separators in field values SHALL be `<br>` tags, never raw newlines.
 
@@ -48,7 +48,11 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 
 #### Scenario: Speaking shows the selection
 - **WHEN** the user extracts a selection in Speaking mode
-- **THEN** `Front` wraps the selection in `<mark>`, `Back` equals the selected text, and `Phone` contains the phonetics
+- **THEN** `Front` wraps the selection in `<mark>` with 🎤 immediately before and after the selected text inside the mark, `Back` equals the selected text without any 🎤, and `Phone` contains the phonetics
+
+#### Scenario: Mic decoration is speaking-only
+- **WHEN** the user extracts a selection in Reading, Writing, or Listening mode
+- **THEN** `Front` contains no 🎤 anywhere in its field value
 
 #### Scenario: Writing extracts the translation
 - **WHEN** the user selects text on a translation line in Writing mode and extracts
@@ -66,7 +70,6 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 #### Scenario: Whole-line selection extracts
 - **WHEN** the user selects an entire line (selection endpoints at the line's boundaries) and presses `a`
 - **THEN** extraction proceeds with start=0 and end=line length
-
 ### Requirement: Dictionary lookup failure tolerance
 The system SHALL treat Youdao lookup network failures and timeouts as empty results and SHALL NOT surface errors that interrupt extraction.
 

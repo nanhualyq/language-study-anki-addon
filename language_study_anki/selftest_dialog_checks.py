@@ -484,7 +484,7 @@ EXTRACT_ROUNDS = [
     ("listening", 10, "@EnListen",
      ["front:source", "highlight:???", "back:selection", "phone:"]),
     ("speaking", 12, "@EnSpeak",
-     ["front:source", "highlight:mark", "back:selection", "phone:"]),
+     ["front:source", "highlight:mark", "mark:mic", "back:selection", "phone:"]),
     ("writing", 14, "@Basic",
      ["front:translation", "back:source-line", "lookup:skipped"]),
 ]
