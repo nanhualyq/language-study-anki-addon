@@ -1,7 +1,7 @@
 """Idempotence guard for addon registration.
 
 The actual hook/menu registrations live in ``__init__.init()`` (suspension
-hook, browser context menu, dev self-test). This guard makes a repeated
+hook, Tools-menu Hub entry, dev self-test). This guard makes a repeated
 ``register()`` call — e.g. during an addon reload — a no-op.
 """
 

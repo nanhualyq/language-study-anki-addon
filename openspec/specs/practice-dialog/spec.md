@@ -2,38 +2,9 @@
 
 ## Purpose
 
-Provides the in-Anki practice experience: a Browser-initiated, per-article dialog with four skill modes that render article lines, restore the last learned position, and track learned lines.
+Provides the in-Anki practice experience: the per-article practice view — rendered inside the practice-hub window — with four skill modes that render article lines, restore the last learned position, and track learned lines.
 
 ## Requirements
-
-### Requirement: Browser context-menu entry
-The system SHALL add a context-menu item group to the Browser table menu for selected article notes, offering "Practice: Reading", "Practice: Speaking", "Practice: Listening", and "Practice: Writing", in that order. The items SHALL appear only when the selection consists of article notes. Each item's label SHALL append the progress percentage of that skill for the **first selected note** — the note whose dialog opens when the item is chosen — formatted as `<base label> (<percent>%)`, e.g. `Practice: Reading (100%)`.
-
-The percentage SHALL be computed as the note's stored progress line for that skill divided by the total number of lines in the note's `Content`, expressed as an integer percentage rounded to the nearest whole number and clamped to the range 0–100. It SHALL be `0%` when the skill has no progress or `Content` has no lines, and `100%` when the stored progress line reaches or exceeds the line count.
-
-#### Scenario: Right-click an article note
-- **WHEN** the user right-clicks a note of the `LSA-Article` note type in the Browser
-- **THEN** the context menu contains the four practice items with their percentage suffixes, and choosing one opens the practice dialog for that article in the chosen mode
-
-#### Scenario: Right-click a non-article note
-- **WHEN** the user right-clicks a note that is not of the `LSA-Article` note type
-- **THEN** no practice items are shown
-
-#### Scenario: Progress shown for the first selected note
-- **WHEN** the user right-clicks a multi-note selection consisting entirely of article notes
-- **THEN** the percentages in the labels describe the first selected note, matching the dialog that would open
-
-#### Scenario: Percentage calculation
-- **WHEN** the first selected article has `Content` of 40 lines, its `ProgReading` is 10, and its `ProgWriting` is 0
-- **THEN** the Reading item is labeled `Practice: Reading (25%)` and the Writing item is labeled `Practice: Writing (0%)`
-
-#### Scenario: Stored progress beyond content
-- **WHEN** the stored progress line for a skill exceeds the current line count of `Content`
-- **THEN** that skill's item shows `100%`
-
-#### Scenario: Empty content
-- **WHEN** the first selected article's `Content` is empty
-- **THEN** all four items show `0%`
 
 ### Requirement: Mode-specific line rendering
 The system SHALL render article content line by line in a web view, with per-mode presentation: Listening shows only a TTS play button per line until the user opens that line to reveal text; Speaking always shows source text plus a play button, with the matching translation line available for that line; Reading always shows source lines, with the matching translation line available for that line; Writing shows the translation line with the corresponding source line available for that line. In every mode, content that is hidden by default SHALL be shown or hidden only through an explicit per-line toggle control (see the "Per-line reveal control" requirement).
@@ -63,26 +34,30 @@ The system SHALL render article content line by line in a web view, with per-mod
 - **THEN** the dialog displays an "Article content is empty" message instead of lines
 
 ### Requirement: Toolbar progress counter and selection hint
-The practice dialog SHALL show a toolbar pinned to the top of the view that remains visible while the article scrolls, displaying the current mode, a learned-progress counter for the mode, and a text-selection hint. The progress counter SHALL be formatted as `<learned>/<total>`, where `<total>` is the number of lines in the article's content and `<learned>` is the mode's stored progress clamped to that count, so the counter never exceeds the total. The hint SHALL state the selection-to-extract action and render the shortcut key in a visually distinct keycap treatment, distinguishable from the surrounding plain text, and SHALL sit at the toolbar's right end so that no hint element overlaps the article body. When an extraction advances the mode's progress, the counter SHALL update immediately without reopening the dialog. No toolbar control SHALL reveal hidden per-line content in bulk.
+The practice view SHALL show a toolbar pinned to the top of the view that remains visible while the article scrolls, displaying at its left end a back control that returns the Hub window to the article list, followed by the current mode, a learned-progress counter for the mode, and a text-selection hint. The progress counter SHALL be formatted as `<learned>/<total>`, where `<total>` is the number of lines in the article's content and `<learned>` is the mode's stored progress clamped to that count, so the counter never exceeds the total. The hint SHALL state the selection-to-extract action and render the shortcut key in a visually distinct keycap treatment, distinguishable from the surrounding plain text, and SHALL sit at the toolbar's right end so that no hint element overlaps the article body. When an extraction advances the mode's progress, the counter SHALL update immediately without leaving the practice view. No toolbar control SHALL reveal hidden per-line content in bulk.
+
+#### Scenario: Back control sits at the toolbar's left end
+- **WHEN** the practice view renders
+- **THEN** the back control is visible at the toolbar's left end, before the mode label, and remains visible while the article scrolls
 
 #### Scenario: Counter shows learned over total
-- **WHEN** the dialog opens in a mode whose stored progress is line 12 and the article's content has 50 lines
+- **WHEN** the practice view opens in a mode whose stored progress is line 12 and the article's content has 50 lines
 - **THEN** the toolbar progress counter displays `12/50`
 
 #### Scenario: Stored progress beyond content is clamped
-- **WHEN** the dialog opens in a mode whose stored progress is 60 and the article's content has 50 lines
+- **WHEN** the practice view opens in a mode whose stored progress is 60 and the article's content has 50 lines
 - **THEN** the toolbar progress counter displays `50/50`
 
 #### Scenario: Counter updates immediately after extraction
 - **WHEN** an extraction advances the current mode's stored progress from line 12 to line 13
-- **THEN** the toolbar progress counter immediately displays `13/<total>` without the dialog being reopened
+- **THEN** the toolbar progress counter immediately displays `13/<total>` without leaving the practice view
 
 #### Scenario: Empty article content
-- **WHEN** the dialog opens for an article whose content has no lines
+- **WHEN** the practice view opens for an article whose content has no lines
 - **THEN** the toolbar progress counter displays `0/0`
 
 #### Scenario: Hint sits in the toolbar, not over the article
-- **WHEN** the practice dialog renders
+- **WHEN** the practice view renders
 - **THEN** the selection hint is visible within the toolbar at its right end, and no hint element covers any part of the article body
 
 #### Scenario: Shortcut key is visually distinct
@@ -90,7 +65,7 @@ The practice dialog SHALL show a toolbar pinned to the top of the view that rema
 - **THEN** the shortcut key (`a`) is rendered in a keycap treatment — visually separated from the adjacent hint words, for example by a border and background — rather than as plain inline text
 
 #### Scenario: No bulk reveal control in the toolbar
-- **WHEN** the dialog is open in any mode
+- **WHEN** the practice view is open in any mode
 - **THEN** the toolbar provides no control that shows or hides hidden content for all lines at once
 
 ### Requirement: Per-line reveal control
@@ -155,20 +130,20 @@ The system SHALL capture text selections within the practice view, recording the
 - **THEN** no extraction occurs and no dialog is opened
 
 ### Requirement: Minimize and maximize controls
-The practice dialog's window caption SHALL expose a minimize control and a maximize control, both operating on the practice dialog itself. Activating minimize SHALL hide the dialog to the platform's minimized state without closing it, and the minimized dialog SHALL be restorable to its previous size and position through the platform's normal window-recovery affordances (taskbar/button or equivalent). Activating maximize SHALL expand the dialog to fill the screen and SHALL be reversible back to the previous size. Window management actions SHALL NOT write progress, close the dialog, or disturb the rendered article state (scroll position, revealed lines, current selection).
+The Hub window's caption SHALL expose a minimize control and a maximize control, both operating on the window itself. Activating minimize SHALL hide the window to the platform's minimized state without closing it, and the minimized window SHALL be restorable to its previous size and position through the platform's normal window-recovery affordances (taskbar/button or equivalent). Activating maximize SHALL expand the window to fill the screen and SHALL be reversible back to the previous size. Window management actions SHALL NOT write progress, close the window, or disturb the current page — including, on the practice view, the rendered article state (scroll position, revealed lines, current selection).
 
 #### Scenario: Minimize button present and functional
-- **WHEN** the user activates the minimize control in the practice dialog's caption
-- **THEN** the dialog is minimized rather than closed, no progress is written, and the dialog remains registered as open for its note and mode
+- **WHEN** the user activates the minimize control in the Hub window's caption
+- **THEN** the window is minimized rather than closed, no progress is written, and the Hub remains open on its current page
 
 #### Scenario: Minimized dialog is restorable
-- **WHEN** the practice dialog has been minimized and the user invokes the platform's restore affordance for it
-- **THEN** the dialog reappears with its previous geometry and with the article scroll position, revealed lines, and selection unchanged
+- **WHEN** the Hub window has been minimized and the user invokes the platform's restore affordance for it
+- **THEN** the window reappears with its previous geometry and, when the practice view was showing, with the article scroll position, revealed lines, and selection unchanged
 
 #### Scenario: Maximize and restore
-- **WHEN** the user activates the maximize control and then restores the dialog
-- **THEN** the dialog fills the screen and then returns to its previous size, with all in-dialog state unchanged
+- **WHEN** the user activates the maximize control and then restores the window
+- **THEN** the window fills the screen and then returns to its previous size, with all in-window state unchanged
 
 #### Scenario: Window management never writes progress
-- **WHEN** the user minimizes, maximizes, or restores the practice dialog at any point
+- **WHEN** the user minimizes, maximizes, or restores the Hub window at any point
 - **THEN** the mode's progress field is unchanged, since progress is written only by an extract

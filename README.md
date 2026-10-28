@@ -15,9 +15,13 @@ Ported from the reference implementation `../my_english_ankier_flutter`; see
   confirmation — the `LSA-Article` type at profile open, the extract types
   (`LSA-ReadWrite`/`LSA-Listen`/`LSA-Speak`) and deck `English` on first extraction —
   and existing types/decks are adopted by name when they already exist.
-- **Browser-native entry** — right-click an `Article` note →
-  `Practice: Reading / Speaking / Listening / Writing`.
-- **One practice dialog, four modes** — line-based rendering, scroll restore to
+- **Article-list Hub** — Tools > `Language Study: Article List` opens one
+  window that lists every article with its four per-skill progress
+  percentages (newest first); clicking a skill entry switches to that
+  practice view, and the back control at the toolbar's left end returns to
+  the list (percentages refresh on return). The window is a singleton —
+  repeated menu clicks raise it.
+- **Practice view, four modes** — line-based rendering, scroll restore to
   the last extracted line, learned-line styling that updates live after an
   extract, per-line TTS (listening/speaking only).
 - **Extract with `a`** — builds a prefilled note in Anki's native Add
@@ -87,7 +91,8 @@ LSA_SELFTEST=1 LSA_SELFTEST_KEEP=1 tools/scratch-anki.sh
 ```
 
 Covers provisioning/adoption, card suspension, Add-dialog `set_note`,
-database hygiene, browser menu labels, mode rendering, scroll restore,
+database hygiene, Hub list rows/percentages/navigation, mode rendering,
+scroll restore,
 selection capture, TTS, and four-mode extraction (note types, field kinds,
 progress writes). `LSA_SELFTEST_KEEP=1` keeps Anki open afterwards for a
 manual pass.

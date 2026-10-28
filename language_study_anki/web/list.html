@@ -1,0 +1,68 @@
+<!--
+  Article-list template (Hub list page). Consumed by language_study_anki/hub.py:
+  the file is read once at module load and passed to QWebEngine as a string.
+
+  Contract with hub.py (keep both ends in sync when editing):
+    Placeholder (string-replaced before setHtml; NAME wrapped in double
+    underscores, e.g. __ + NAME + __ — written split here on purpose so the
+    literal token never appears in this comment and the Python-side
+    str.replace cannot corrupt the comment):
+      LSA_DATA    JSON payload {rows:[{id,title,pcts:{reading,speaking,
+                  listening,writing}}]}
+    Bridge commands (JS -> Python via pycmd):
+      lsa:open:<note_id>:<mode>   enter practice for that row's skill entry
+    Row layout: title + four skill entries in reading, speaking, listening,
+    writing order; each entry shows "<Skill> <pct>%". Empty rows -> empty
+    state message instead of rows.
+-->
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
+#list { padding: 10px 14px; }
+.row { background: #fff; border: 1px solid #e3e3e5; border-radius: 6px;
+  padding: 10px 12px; margin-bottom: 8px; }
+.title { font-size: 14px; font-weight: 600; margin-bottom: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skills { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Skill entries are the only activatable part of a row (spec:
+   practice-hub -> List-to-practice navigation). */
+.skill { border: 1px solid #bbb; background: #fff; border-radius: 4px;
+  cursor: pointer; padding: 3px 10px; font-size: 12px; }
+.skill:hover { background: #ececec; }
+.empty { padding: 60px 20px; text-align: center; color: #888;
+  font-size: 18px; }
+</style></head>
+<body>
+<div id="list"></div>
+<script>
+const D = __LSA_DATA__;
+const ORDER = ["reading", "speaking", "listening", "writing"];
+const LABELS = {reading: "Reading", speaking: "Speaking",
+                listening: "Listening", writing: "Writing"};
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+const list = document.getElementById('list');
+if (!D.rows || D.rows.length === 0) {
+  list.innerHTML = '<div class="empty">No articles yet</div>';
+} else {
+  let html = '';
+  for (const r of D.rows) {
+    let skills = '';
+    for (const m of ORDER) {
+      const pct = (r.pcts && r.pcts[m]) || 0;
+      skills += '<button class="skill" data-open="' + r.id + ':' + m + '">' +
+                esc(LABELS[m]) + ' ' + pct + '%</button>';
+    }
+    html += '<div class="row" data-id="' + r.id + '"><div class="title">' + esc(r.title) +
+            '</div><div class="skills">' + skills + '</div></div>';
+  }
+  list.innerHTML = html;
+}
+
+list.addEventListener('click', function(e){
+  const b = e.target.closest('[data-open]');
+  if (b) pycmd('lsa:open:' + b.dataset.open);
+});
+</script>
+</body></html>

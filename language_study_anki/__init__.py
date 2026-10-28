@@ -48,10 +48,10 @@ def init() -> None:
     except ImportError:
         pass  # outside Anki (e.g. unit tests under a system interpreter)
     else:
-        from . import browser_menu, provisioning_ui, selftest, suspension
+        from . import hub, provisioning_ui, selftest, suspension
 
         suspension.register()
-        browser_menu.register()
+        hub.register()
         provisioning_ui.register()
         selftest.register()
 

@@ -122,60 +122,265 @@ def _js(dialog, code, cb) -> None:
     dialog.web.page().runJavaScript(code, cb)
 
 
-# ---------------------------------------------------------------- 4.1 menu
+# ------------------------------------------------------------ 4.1 hub
+
+_JS_HUB_LIST = (
+    "JSON.stringify({"
+    "empty: !!document.querySelector('.empty'),"
+    "ids: Array.from(document.querySelectorAll('.row')).map("
+    "function(r){return +r.dataset.id;}),"
+    "rows: Array.from(document.querySelectorAll('.row')).map(function(r){"
+    "return {title: r.querySelector('.title').textContent,"
+    "skills: Array.from(r.querySelectorAll('.skill')).map("
+    "function(s){return s.textContent;})};})"
+    "})"
+)
+
+_JS_HUB_PRACTICE = (
+    "JSON.stringify({"
+    "back: !!document.getElementById('back'),"
+    "backFirst: !!document.querySelector('#toolbar') && "
+    "document.querySelector('#toolbar').firstElementChild.id === 'back',"
+    "mode: (document.getElementById('mode-name')||{}).textContent,"
+    "counter: (document.getElementById('pf')||{}).textContent,"
+    "rows: document.querySelectorAll('.line').length"
+    "})"
+)
+
+_JS_HUB_EMPTY = (
+    "JSON.stringify({"
+    "empty: !!document.querySelector('.empty'),"
+    "rows: document.querySelectorAll('.row').length"
+    "})"
+)
+
+_HUB_SKILL_LABELS = {
+    "reading": "Reading",
+    "speaking": "Speaking",
+    "listening": "Listening",
+    "writing": "Writing",
+}
 
 
-def check_browser_menu(mw, report, done) -> None:
-    try:
-        from .browser_menu import build_menu_labels
+def check_hub_list(mw, report, done) -> None:
+    """add-article-list-hub (spec: practice-hub): Tools-menu Hub, list
+    rows with per-skill percentages in newest-first order, empty state,
+    lsa:open / lsa:back navigation, titles, singleton, no progress writes
+    on navigation, and percentage refresh after a progress write during
+    practice. Replaces the removed browser-menu check."""
+    from . import hub as hub_mod
+    from .hub import list_html
+    from .practice_dialog import MODES
+    from .storage import field_to_lines
 
-        col = mw.col
-        art = _ensure_long_article(col)
-        prov = provisioning.provision(col)
-        basic = col.new_note(prov["extract_notetypes"]["LSA-ReadWrite"])
-        basic["Front"] = "not an article"
-        col.add_note(basic, prov["extract_deck_id"])
+    col = mw.col
+    _ensure_long_article(col)
+    provisioning.provision(col)
+    result = report["detail"] = {}
 
-        labels = build_menu_labels([art], col)
-        mixed = build_menu_labels([art, basic.id], col)
-        other = build_menu_labels([basic.id], col)
-        none_sel = build_menu_labels([], col)
-
-        # Expected percentages re-derived from the fixture's own progress
-        # fields and Content line count (labels show the FIRST note = art).
-        from .practice_dialog import MODES, MODE_LABELS
-        from .storage import field_to_lines
-
-        note = col.get_note(art)
-        total = len(field_to_lines(note["Content"]))
-
-        def pct(skill: str) -> int:
-            line = get_progress(note, skill)
-            if total <= 0 or line <= 0:
-                return 0
-            if line >= total:
-                return 100
-            return int(line * 100.0 / total + 0.5)
-
-        expected = [
-            (mode, f"{MODE_LABELS[mode]} ({pct(mode)}%)") for mode in MODES
-        ]
-        report["ok"] = (
-            labels == expected
-            and mixed is None
-            and other is None
-            and none_sel is None
-        )
-        report["detail"] = {
-            "labels": labels,
-            "mixed_is_none": mixed is None,
-            "non_article_is_none": other is None,
-            "empty_is_none": none_sel is None,
-        }
-    except Exception:
+    # Spec: Tools-menu entry — trigger the registered action itself so this
+    # check covers registration, the exact label, the handler, and the
+    # singleton, rather than bypassing the menu via open_hub().
+    menu_actions = [
+        a for a in mw.form.menuTools.actions()
+        if a.text() == hub_mod.MENU_LABEL
+    ]
+    result["menu_action_count"] = len(menu_actions)
+    if len(menu_actions) != 1:
         report["ok"] = False
-        report["detail"] = traceback.format_exc()
-    done()
+        done()
+        return
+
+    # Expected rows re-derived from the collection (newest id first) —
+    # independent of hub.list_payload's own implementation.
+    note_ids = sorted(
+        col.find_notes(f'"note:{provisioning.ARTICLE_NOTE_TYPE}"'),
+        reverse=True,
+    )
+    expected = []
+    progress_before = {}
+    for nid in note_ids:
+        note = col.get_note(nid)
+        expected.append(
+            {
+                "id": nid,
+                "title": note["Title"] or "",
+                "skills": [
+                    f"{_HUB_SKILL_LABELS[m]} {_progress_pct(note, m)}%"
+                    for m in MODES
+                ],
+            }
+        )
+        for m in MODES:
+            progress_before[(nid, m)] = get_progress(note, m)
+
+    # A leftover Hub from an earlier run/check must not mask the singleton.
+    if hub_mod._hub is not None:
+        try:
+            hub_mod._hub.close()
+        except Exception:
+            pass
+
+    menu_actions[0].trigger()          # opens the Hub on the list page
+    hub = hub_mod._hub
+    result["hub_opened"] = hub is not None
+    if hub is None:
+        report["ok"] = False
+        done()
+        return
+    menu_actions[0].trigger()          # must raise, not duplicate
+    result["singleton_same"] = hub_mod._hub is hub
+    injected = None  # (nid, skill, value) written while on the practice page
+
+    def snapshot() -> dict:
+        return {
+            (nid, m): get_progress(col.get_note(nid), m)
+            for nid in note_ids
+            for m in MODES
+        }
+
+    def finish(ok: bool) -> None:
+        try:
+            hub.close()
+        except Exception:
+            pass
+        report["ok"] = ok and bool(result.get("singleton_same"))
+        done()
+
+    def probe_list(payload):
+        try:
+            d = json.loads(payload)
+            result["list"] = d
+            rows_ok = d["rows"] == [
+                {"title": e["title"], "skills": e["skills"]} for e in expected
+            ]
+            ids_ok = d["ids"] == [e["id"] for e in expected]  # newest first
+            title_ok = hub.windowTitle() == hub_mod.LIST_TITLE
+            result["list_ok"] = rows_ok and ids_ok and title_ok
+            if not (rows_ok and ids_ok and title_ok):
+                finish(False)
+                return
+            # Enter practice by CLICKING the first row's reading entry —
+            # exercises list.js -> pycmd -> bridge, not a Python shortcut.
+            # Fire-and-forget: the click navigates the page (setHtml), which
+            # would DROP a pending runJavaScript result callback — so the
+            # next probe is scheduled from Python, not from the JS callback.
+            hub.web.page().runJavaScript(
+                "document.querySelector('.row .skill').click()"
+            )
+            after_delay(1500, lambda: _js(hub, _JS_HUB_PRACTICE, probe_practice))
+        except Exception:
+            result["list_err"] = traceback.format_exc()
+            finish(False)
+
+    def probe_practice(payload):
+        nonlocal injected
+        try:
+            d = json.loads(payload)
+            result["practice"] = d
+            newest = expected[0]
+            note = col.get_note(newest["id"])
+            total = len(field_to_lines(note["Content"]))
+            prog = min(get_progress(note, "reading"), total)
+            from .practice_dialog import MODE_LABELS
+
+            title = hub.windowTitle()
+            # Opening the practice page must not write progress.
+            open_now = snapshot()
+            open_now_ok = open_now == progress_before
+            ok = (
+                d["back"]
+                and d["backFirst"]            # back sits at the toolbar's left end
+                and d["mode"] == "reading"
+                and d["counter"] == f"{prog}/{total}"
+                and d["rows"] == total
+                and MODE_LABELS["reading"] in title
+                and newest["title"] in title
+                and open_now_ok
+            )
+            result["practice_ok"] = ok
+            if not ok:
+                finish(False)
+                return
+            # Simulate the extract-time progress write (the only write
+            # path) for the article open in practice, so the return-to-list
+            # refresh scenario is observable. Skip when already complete —
+            # a monotonic extract would not advance either.
+            cur = get_progress(note, "reading")
+            if 0 < total and cur < total:
+                _set_progress_raw(col, newest["id"], "reading", total)
+                injected = (newest["id"], "reading", total)
+                expected[0]["skills"][0] = "Reading 100%"
+            # Return via the DOM back control (list.js contract: lsa:back).
+            # Fire-and-forget again: lsa:back navigates (setHtml) and would
+            # drop a pending result callback — schedule the probe from here.
+            hub.web.page().runJavaScript(
+                "document.getElementById('back').click()"
+            )
+            after_delay(1500, lambda: _js(hub, _JS_HUB_LIST, probe_back))
+        except Exception:
+            result["practice_err"] = traceback.format_exc()
+            finish(False)
+
+    def probe_back(payload):
+        try:
+            d = json.loads(payload)
+            result["list_after_back"] = d
+            # Refresh: the row touched during practice shows the new
+            # percentage; every other row is unchanged.
+            rows_ok = d["rows"] == [
+                {"title": e["title"], "skills": e["skills"]} for e in expected
+            ]
+            title_ok = hub.windowTitle() == hub_mod.LIST_TITLE
+            # Return-to-list must not write progress itself: state equals
+            # the pre-navigation snapshot plus exactly the injected write.
+            after = snapshot()
+            expected_after = dict(progress_before)
+            if injected:
+                expected_after[(injected[0], injected[1])] = injected[2]
+            back_now_ok = after == expected_after
+            result["nav_ok"] = rows_ok and title_ok and back_now_ok
+            result["injected"] = injected
+            if not (rows_ok and title_ok and back_now_ok):
+                finish(False)
+                return
+            # Empty state: render an empty payload (collection always has
+            # the fixture, so this probes the template's empty branch).
+            hub._set_html(list_html({"rows": []}))
+            after_delay(1200, lambda: _js(hub, _JS_HUB_EMPTY, probe_empty))
+        except Exception:
+            result["back_err"] = traceback.format_exc()
+            finish(False)
+
+    def probe_empty(payload):
+        try:
+            d = json.loads(payload)
+            result["empty"] = d
+            finish(d["empty"] and d["rows"] == 0)
+        except Exception:
+            result["empty_err"] = traceback.format_exc()
+            finish(False)
+
+    after_delay(1300, lambda: _js(hub, _JS_HUB_LIST, probe_list))
+
+
+def _progress_pct(note, skill: str) -> int:
+    """Spec percentage rules, re-derived here (not via hub._progress_percent)
+    so the selftest does not grade the helper with itself."""
+    from .storage import field_to_lines
+
+    try:
+        total = len(field_to_lines(note["Content"]))
+    except Exception:
+        return 0
+    if total <= 0:
+        return 0
+    line = get_progress(note, skill)
+    if line <= 0:
+        return 0
+    if line >= total:
+        return 100
+    return int(line * 100.0 / total + 0.5)
 
 
 # ---------------------------------------------------------------- 4.2 modes
@@ -941,7 +1146,7 @@ def check_learned_style(mw, report, done) -> None:
 
 
 CHECKS_EXTRA = [
-    ("browser_menu", check_browser_menu),
+    ("hub_list", check_hub_list),
     ("dialog_modes", check_dialog_modes),
     ("dialog_restore", check_dialog_restore),
     ("selection_capture", check_selection_capture),
