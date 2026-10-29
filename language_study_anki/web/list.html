@@ -7,20 +7,41 @@
     underscores, e.g. __ + NAME + __ — written split here on purpose so the
     literal token never appears in this comment and the Python-side
     str.replace cannot corrupt the comment):
-      LSA_DATA    JSON payload {rows:[{id,title,pcts:{reading,speaking,
-                  listening,writing}}]}
+      LSA_DATA    JSON payload {rows:[{id,title,cover,pcts:{reading,
+                  speaking,listening,writing}}]}
     Bridge commands (JS -> Python via pycmd):
       lsa:open:<note_id>:<mode>   enter practice for that row's skill entry
-    Row layout: title + four skill entries in reading, speaking, listening,
-    writing order; each entry shows "<Skill> <pct>%". Empty rows -> empty
-    state message instead of rows.
+    Row layout: cover thumbnail at the row's left when the row's cover
+    value is non-empty, plus a content block of title and four skill
+    entries in reading, speaking, listening, writing order; each entry
+    shows "<Skill> <pct>%". A row whose cover is empty renders the same
+    title + skills with no thumbnail (no placeholder in its place). Empty
+    rows -> empty state message instead of rows.
+
+  Cover image URLs (Anki >= 2.1.50 media-server model):
+    AnkiWebView.setHtml serves this page from
+    http://127.0.0.1:<port>/_anki/legacyPageData?id=N, so a bare relative
+    src="foo.jpg" would resolve to /_anki/foo.jpg — Anki's internal web
+    asset namespace — and 404 (media files are served from the server
+    root). The <base href="/"> below re-bases every relative URL in the
+    page to the server root, where the media server maps the path to the
+    collection media folder. Keep it; the static test in test_hub.py
+    guards its presence.
 -->
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
+<html><head><meta charset="utf-8"><base href="/"><style>
 body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 #list { padding: 10px 14px; }
 .row { background: #fff; border: 1px solid #e3e3e5; border-radius: 6px;
-  padding: 10px 12px; margin-bottom: 8px; }
+  padding: 10px 12px; margin-bottom: 8px; display: flex; align-items:
+  flex-start; gap: 12px; }
+/* Cover thumbnail: fixed max height, aspect ratio preserved by keeping
+   intrinsic sizing and cropping only overflow (spec: practice-hub ->
+   Article list page). */
+.row .cover { flex: none; }
+.row .cover img { display: block; max-height: 96px; width: auto;
+  max-width: 160px; border-radius: 4px; object-fit: cover; }
+.row .content { min-width: 0; flex: 1; }
 .title { font-size: 14px; font-weight: 600; margin-bottom: 8px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skills { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -54,8 +75,14 @@ if (!D.rows || D.rows.length === 0) {
       skills += '<button class="skill" data-open="' + r.id + ':' + m + '">' +
                 esc(LABELS[m]) + ' ' + pct + '%</button>';
     }
-    html += '<div class="row" data-id="' + r.id + '"><div class="title">' + esc(r.title) +
-            '</div><div class="skills">' + skills + '</div></div>';
+    // Cover is user-maintained HTML (typically an <img> pointing into the
+    // collection media folder), rendered as-is rather than escaped — the
+    // row is built with a template string below. An empty cover renders
+    // no thumbnail and no placeholder.
+    const cover = r.cover ? '<div class="cover">' + r.cover + '</div>' : '';
+    html += '<div class="row" data-id="' + r.id + '">' + cover +
+            '<div class="content"><div class="title">' + esc(r.title) +
+            '</div><div class="skills">' + skills + '</div></div></div>';
   }
   list.innerHTML = html;
 }

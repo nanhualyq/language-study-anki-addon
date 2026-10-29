@@ -178,6 +178,29 @@ class ListPayloadTests(unittest.TestCase):
         rows = list_payload(FakeCol({5: note}, order=[5]))["rows"]
         self.assertEqual(rows[0]["title"], "")
 
+    def test_row_carries_cover_value(self):
+        # Cover is user-maintained raw <img> HTML, passed through as-is.
+        note = FakeNote(
+            content=content_of(4),
+            Title="A",
+            Cover='<img src="paste-abc.jpg">',
+        )
+        rows = list_payload(FakeCol({5: note}, order=[5]))["rows"]
+        self.assertEqual(rows[0]["cover"], '<img src="paste-abc.jpg">')
+
+    def test_missing_cover_field_is_empty_string(self):
+        # A freshly provisioned or adopted note may lack Cover entirely:
+        # a missing field yields "" rather than raising (spec: practice-hub
+        # → Article list page, empty/absent cover fallback).
+        note = FakeNote(content=content_of(4), Title="A")  # no Cover key
+        rows = list_payload(FakeCol({5: note}, order=[5]))["rows"]
+        self.assertEqual(rows[0]["cover"], "")
+
+    def test_empty_cover_field_is_empty_string(self):
+        note = FakeNote(content=content_of(4), Title="A", Cover="")
+        rows = list_payload(FakeCol({5: note}, order=[5]))["rows"]
+        self.assertEqual(rows[0]["cover"], "")
+
 
 class ListHtmlTests(unittest.TestCase):
     """Static template checks. Row rendering itself happens at runtime in
@@ -224,6 +247,57 @@ class ListHtmlTests(unittest.TestCase):
         # percent label format "<Skill> <pct>%" (label + ' ' + pct, then
         # the button close appended to the same JS string literal)
         self.assertIn("esc(LABELS[m]) + ' ' + pct + '%</button>'", html)
+
+    def test_cover_is_embedded_unescaped_and_conditional(self):
+        # Cover is user-maintained HTML (typically an <img> into the media
+        # folder) and must reach the DOM as-is, unlike title (spec:
+        # practice-hub → Article list page, cover thumbnail scenario).
+        payload = {
+            "rows": [
+                {
+                    "id": 3,
+                    "title": "A",
+                    "cover": '<img src="paste-abc.jpg">',
+                    "pcts": {},
+                }
+            ]
+        }
+        html = list_html(payload)
+        raw = html.split("const D = ", 1)[1].split(";", 1)[0]
+        self.assertEqual(
+            json.loads(raw)["rows"][0]["cover"], '<img src="paste-abc.jpg">'
+        )
+        # rendered raw (no esc() on cover) inside the row's .cover block
+        self.assertIn("' + r.cover + '", html)
+
+    def test_cover_thumbnail_css_preserves_aspect_ratio(self):
+        # fixed max height with intrinsic width + object-fit crop (spec:
+        # practice-hub → Article list page)
+        html = list_html({"rows": []})
+        self.assertIn(".row .cover img", html)
+        self.assertIn("max-height", html)
+        self.assertIn("object-fit: cover", html)
+
+    def test_row_layout_is_cover_plus_content_flex(self):
+        # each row is a flex container holding the cover block and a
+        # .content block of title + skills (empty-cover rows drop the
+        # cover block via the ternary, leaving no placeholder)
+        html = list_html({"rows": []})
+        self.assertIn('const cover = r.cover ? ', html)
+        self.assertIn('<div class=\"content\">', html)
+
+    def test_base_tag_rebases_relative_urls_to_media_root(self):
+        # Anki serves this page from /_anki/legacyPageData?id=N, so a bare
+        # relative src="paste-x.jpg" resolves to /_anki/paste-x.jpg and 404s
+        # (Anki's internal web-asset namespace; media lives at the server
+        # root). <base href="/"> re-bases it to /paste-x.jpg, which the
+        # media server maps to the collection media folder. Removing the
+        # tag silently breaks every cover thumbnail — guard it.
+        html = list_html({"rows": []})
+        self.assertIn('<base href="/">', html)
+        # ...and it must sit before any element that resolves URLs
+        self.assertLess(html.index('<base href="/">'),
+                        html.index('const D = '))
 
 
 if __name__ == "__main__":

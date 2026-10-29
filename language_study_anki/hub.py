@@ -113,10 +113,18 @@ def list_payload(col) -> dict:
             title = note["Title"] or ""
         except KeyError:
             title = ""
+        # Cover is user-maintained and may be absent on an adopted or
+        # freshly provisioned note, so a missing field yields "" rather
+        # than raising (spec: practice-hub → Article list page).
+        try:
+            cover = note["Cover"] or ""
+        except KeyError:
+            cover = ""
         rows.append(
             {
                 "id": int(nid),
                 "title": title,
+                "cover": cover,
                 "pcts": {m: _progress_percent(note, m) for m in MODES},
             }
         )
