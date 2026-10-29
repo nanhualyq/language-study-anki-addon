@@ -132,7 +132,10 @@ _JS_HUB_LIST = (
     "rows: Array.from(document.querySelectorAll('.row')).map(function(r){"
     "return {title: r.querySelector('.title').textContent,"
     "skills: Array.from(r.querySelectorAll('.skill')).map("
-    "function(s){return s.textContent;})};})"
+    # each skill entry is a ring: percent lives in .pct, name in .name
+    # (whole-button textContent no longer carries "<Skill> <pct>%")
+    "function(s){return s.querySelector('.name').textContent + ' ' +"
+    " s.querySelector('.pct').textContent;})};})"
     "})"
 )
 

@@ -244,9 +244,15 @@ class ListHtmlTests(unittest.TestCase):
         )
         # each skill entry sends lsa:open:<id>:<mode> through the bridge
         self.assertIn("pycmd('lsa:open:' + b.dataset.open)", html)
-        # percent label format "<Skill> <pct>%" (label + ' ' + pct, then
-        # the button close appended to the same JS string literal)
-        self.assertIn("esc(LABELS[m]) + ' ' + pct + '%</button>'", html)
+        # percent is rendered as a circular progress ring: the arc is a
+        # full circle whose dashoffset = C*(1 - pct/100) (C from r=15.5),
+        # with the integer percent centered in .pct and the skill name in
+        # .name below (spec: practice-hub -> Article list page)
+        self.assertIn('class="ring"', html)
+        self.assertIn('stroke-dashoffset', html)
+        self.assertIn("RING_C * (1 - Math.max(0, Math.min(100, pct)) / 100)", html)
+        self.assertIn('<span class=\"pct\">', html)
+        self.assertIn('<span class=\"name\">', html)
 
     def test_cover_is_embedded_unescaped_and_conditional(self):
         # Cover is user-maintained HTML (typically an <img> into the media
