@@ -4,11 +4,13 @@ Specs: practice-hub (Tools-menu entry, singleton, list page, navigation,
 return-to-list) and practice-dialog (the practice page rendered inside this
 window; the old Browser context-menu entry is gone).
 
-Decisions (design.md): D1 single QDialog window; D2 page swap by setHtml in
+Decisions (design.md): D1 single QMainWindow window constructed
+Browser-style (no parent, Qt.Window type); D2 page swap by setHtml in
 one AnkiWebView; D3 bridge navigation commands lsa:open / lsa:back;
 D4 practice-page state lives here so extract.py and the self-test keep
 reading the same attributes they read off the old PracticeDialog;
-D7 Tools-menu registration with a no-profile guard.
+D7 Tools-menu registration with a no-profile guard; D8 profile-close
+hook closes the Hub (parent-less windows are not auto-destroyed).
 
 CONTRACT with web/list.html and web/practice.html (keep both ends in sync):
   Placeholders replaced before setHtml:
@@ -29,7 +31,7 @@ import json
 import os
 import traceback
 
-from aqt.qt import QDialog, Qt, QVBoxLayout
+from aqt.qt import QMainWindow, Qt
 
 from . import tts
 from .practice_dialog import MODE_LABELS, MODES
@@ -185,9 +187,16 @@ class PracticePage:
                 pass
 
 
-class HubWindow(QDialog):
+class HubWindow(QMainWindow):
     """Single window with two pages: article list <-> practice
-    (spec: practice-hub). One AnkiWebView; pages swap via setHtml."""
+    (spec: practice-hub). One AnkiWebView; pages swap via setHtml.
+
+    Constructed Browser-style (Anki's own card browser): no Qt parent and
+    an explicit Qt.Window type, so on Windows the Hub is a real top-level
+    window with its own taskbar button — a minimized Hub is restorable
+    from the taskbar like the Browser, not lost inside the main window's
+    button. Lifecycle without the parent is handled by the
+    profile_will_close hook registered in register()."""
 
     def __init__(
         self,
@@ -196,7 +205,10 @@ class HubWindow(QDialog):
         note_id: int | None = None,
         mode: str | None = None,
     ) -> None:
-        super().__init__(parent)
+        # Browser-style: no parent, explicit Window type (see class doc).
+        # ``parent`` is kept in the signature for caller compatibility but
+        # deliberately not passed to Qt.
+        QMainWindow.__init__(self, None, Qt.WindowType.Window)
         self.mw = mw
         self._page = "list"
         self._practice: PracticePage | None = None
@@ -204,17 +216,7 @@ class HubWindow(QDialog):
         self.extract_log: list[str] = []
 
         self.setWindowTitle(LIST_TITLE)
-        # Qt::Dialog windows get no min/max caption buttons on Windows
-        # (WS_MINIMIZEBOX/WS_MAXIMIZEBOX absent). Same pattern as Anki's own
-        # aqt/models.py dialog. Set before show() (practice-dialog spec:
-        # Minimize and maximize controls).
-        self.setWindowFlags(
-            self.windowFlags()
-            | Qt.WindowType.WindowMinimizeButtonHint
-            | Qt.WindowType.WindowMaximizeButtonHint
-        )
         self.resize(920, 720)
-        layout = QVBoxLayout(self)
 
         from aqt.webview import AnkiWebView
 
@@ -223,7 +225,7 @@ class HubWindow(QDialog):
             self.web.set_bridge_command(self._on_bridge, self)
         except (AttributeError, TypeError):
             self.web.onBridgeCmd = self._on_bridge
-        layout.addWidget(self.web)
+        self.setCentralWidget(self.web)
 
         if note_id is not None:
             self.show_practice(note_id, mode)
@@ -401,12 +403,18 @@ def _raise(hub: HubWindow) -> None:
 
 
 def register() -> None:
-    """Tools-menu entry (spec: practice-hub → Tools-menu entry)."""
-    from aqt import mw
+    """Tools-menu entry + Hub lifecycle hook
+    (spec: practice-hub → Tools-menu entry, Independent top-level window)."""
+    from aqt import gui_hooks, mw
     from aqt.qt import QAction
 
     if mw is None:
         return
+    # A parent-less Hub is no longer destroyed with the main window, so
+    # close it before the profile goes away (design D3). Bare append like
+    # suspension/selftest hooks — bootstrap's guard covers repeated
+    # registration (Anki's hook classes expose no membership API).
+    gui_hooks.profile_will_close.append(_close_hub_on_profile_close)
     # Addon reload must not duplicate the action (bootstrap's guard covers
     # hook registrations; this one lives on the menu itself).
     if mw.form.menuTools.findChild(QAction, _MENU_OBJECT_NAME) is not None:
@@ -415,6 +423,25 @@ def register() -> None:
     action.setObjectName(_MENU_OBJECT_NAME)
     action.triggered.connect(_on_menu_triggered)
     mw.form.menuTools.addAction(action)
+
+
+def _close_hub_on_profile_close() -> None:
+    """Close the singleton Hub when the profile shuts down (design D3):
+    the Hub holds mw.col references and, having no Qt parent, would
+    otherwise outlive the collection."""
+    global _hub
+    hub = _hub
+    if hub is None:
+        return
+    try:
+        hub.close()  # closeEvent clears _hub
+    except RuntimeError:
+        _hub = None  # C++ object already deleted
+    except Exception:
+        print(
+            "language_study_anki: hub close on profile close failed:\n"
+            + traceback.format_exc()
+        )
 
 
 def _on_menu_triggered() -> None:
