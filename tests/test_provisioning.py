@@ -221,7 +221,10 @@ _PROD_HEADER = (
     '{{#Url}} <br><a href="{{Url}}">{{Url}}</a> {{/Url}}\n'
     "</p>\n\n"
 )
-_PROD_COVER = "{{#Cover}}<br>{{Cover}}{{/Cover}}\n"
+# Cover block intentionally diverges from the 2026-10-25 production
+# snapshot: the cover is wrapped in <p> (paragraph spacing from the text
+# above) instead of the original glued-on <br> variant.
+_PROD_COVER = "{{#Cover}}<p>{{Cover}}</p>{{/Cover}}\n"
 
 
 class ProductionParityTest(unittest.TestCase):

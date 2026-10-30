@@ -83,7 +83,10 @@ _CARD_HEADER = (
     '{{#Url}} <br><a href="{{Url}}">{{Url}}</a> {{/Url}}\n'
     "</p>\n\n"
 )
-_COVER_BLOCK = "{{#Cover}}<br>{{Cover}}{{/Cover}}\n"
+# The cover is wrapped in <p> so it keeps paragraph spacing from the
+# Front/TTS text above (the earlier <br> variant rendered it glued to
+# that text).
+_COVER_BLOCK = "{{#Cover}}<p>{{Cover}}</p>{{/Cover}}\n"
 EXTRACT_TEMPLATES = {
     "LSA-ReadWrite": {
         "qfmt": _CARD_HEADER + "{{Front}}\n\n" + _COVER_BLOCK,
