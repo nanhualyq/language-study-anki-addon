@@ -11,9 +11,18 @@
                   speaking,listening,writing}}]}
     Bridge commands (JS -> Python via pycmd):
       lsa:open:<note_id>:<mode>   enter practice for that row's skill entry
+      lsa:add                     global add: the page-level Add button
+      lsa:edit:<note_id>          row menu -> edit that article in place
+      lsa:dup:<note_id>           row menu -> duplicate that article as new
+      lsa:del:<note_id>           row menu -> delete that article (the
+                                  Python side confirms before removing)
     Row layout: cover thumbnail at the row's left when the row's cover
-    value is non-empty, plus a content block of title and four skill
-    entries in reading, speaking, listening, writing order; each entry
+    value is non-empty, plus a content block of a title row and four skill
+    entries in reading, speaking, listening, writing order; the title row
+    holds the article title and a "..." menu button whose popup offers
+    Edit / Duplicate as New / Delete (each entry posts its
+    lsa:<action>:<note_id> command; the menu is OUTSIDE .title so the
+    self-test's title probe stays exact). Each skill entry
     is a button showing a circular progress ring (arc length = the
     skill's percentage, 0% = empty track, 100% = full ring, single
     accent color) with the integer percent centered inside the ring and
@@ -21,7 +30,8 @@
     sub-elements of each .skill entry (not the button's whole text).
     A row whose cover is empty renders the same title + skills with no
     thumbnail (no placeholder in its place). Empty rows -> empty state
-    message instead of rows.
+    message instead of rows. The Add button sits above the list and is
+    rendered whether or not rows exist.
 
   Cover image URLs (Anki >= 2.1.50 media-server model):
     AnkiWebView.setHtml serves this page from
@@ -47,8 +57,36 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 .row .cover img { display: block; max-height: 96px; width: auto;
   max-width: 160px; border-radius: 4px; object-fit: cover; }
 .row .content { min-width: 0; flex: 1; }
-.title { font-size: 14px; font-weight: 600; margin-bottom: 8px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { font-size: 14px; font-weight: 600; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.titlerow { display: flex; align-items: flex-start; gap: 8px;
+  margin-bottom: 8px; }
+.titlerow .title { flex: 1; min-width: 0; }
+/* Row action menu (spec: article-management): a "..." button with a
+   popup of Edit / Duplicate as New / Delete entries. The popup must not
+   widen the row or overlap the title text. */
+.menu { position: relative; flex: none; }
+.menu-btn { border: none; background: none; cursor: pointer; font-size: 16px;
+  line-height: 1; padding: 2px 6px; border-radius: 6px; color: #666; }
+.menu-btn:hover { background: #ececec; }
+.menu-pop { position: absolute; right: 0; top: 100%; z-index: 10; min-width:
+  160px; background: #fff; border: 1px solid #e3e3e5; border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); display: flex; flex-direction:
+  column; overflow: hidden; }
+/* The popup is shown/hidden via the HTML hidden attribute (JS toggles
+   .hidden), but the author-level display:flex above outranks the UA
+   [hidden]{display:none} rule — this explicit rule must win or the menu
+   is permanently visible. Guarded by a static test in tests/test_hub.py. */
+.menu-pop[hidden] { display: none; }
+.menu-pop button { border: none; background: none; cursor: pointer; text-align:
+  left; padding: 8px 12px; font-size: 13px; color: #222; }
+.menu-pop button:hover { background: #ececec; }
+/* Page-level add entry (spec: practice-hub -> global add is always
+   available, also in the empty state). */
+.toolbar { padding: 10px 14px 0; }
+#add-btn { border: 1px solid #3b82f6; background: #3b82f6; color: #fff;
+  border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+#add-btn:hover { background: #2f6fd6; }
 .skills { display: flex; gap: 8px; flex-wrap: wrap; }
 /* Skill entries are the only activatable part of a row (spec:
    practice-hub -> List-to-practice navigation). Each is a small vertical
@@ -74,6 +112,7 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
   font-size: 18px; }
 </style></head>
 <body>
+<div class="toolbar"><button id="add-btn">+ Add Article</button></div>
 <div id="list"></div>
 <script>
 const D = __LSA_DATA__;
@@ -118,16 +157,57 @@ if (!D.rows || D.rows.length === 0) {
     // row is built with a template string below. An empty cover renders
     // no thumbnail and no placeholder.
     const cover = r.cover ? '<div class="cover">' + r.cover + '</div>' : '';
+    // Row action menu: entries post their lsa:<action>:<note_id> command
+    // (spec: article-management). Built with the id baked into data-act so
+    // the click handler needs no id parsing.
+    const menu =
+      '<div class="menu"><button class="menu-btn" data-menu="1"' +
+      ' title="Actions">&#8942;</button><div class="menu-pop" hidden>' +
+      '<button data-act="lsa:edit:' + r.id + '">Edit</button>' +
+      '<button data-act="lsa:dup:' + r.id + '">Duplicate as New</button>' +
+      '<button data-act="lsa:del:' + r.id + '">Delete</button>' +
+      '</div></div>';
     html += '<div class="row" data-id="' + r.id + '">' + cover +
-            '<div class="content"><div class="title">' + esc(r.title) +
+            '<div class="content"><div class="titlerow"><div class="title">' +
+            esc(r.title) + '</div>' + menu +
             '</div><div class="skills">' + skills + '</div></div></div>';
   }
   list.innerHTML = html;
 }
 
+function closeMenus(except) {
+  for (const p of list.querySelectorAll('.menu-pop')) {
+    if (p !== except) p.hidden = true;
+  }
+}
+
 list.addEventListener('click', function(e){
+  const mb = e.target.closest('[data-menu]');
+  if (mb) {
+    // "..." button toggles its popup and closes the other rows' popups.
+    const pop = mb.nextElementSibling;
+    const willShow = pop.hidden;
+    closeMenus(willShow ? pop : null);
+    pop.hidden = !willShow;
+    return;
+  }
+  const a = e.target.closest('[data-act]');
+  if (a) {
+    closeMenus(null);
+    pycmd(a.dataset.act);
+    return;
+  }
   const b = e.target.closest('[data-open]');
-  if (b) pycmd('lsa:open:' + b.dataset.open);
+  if (b) {
+    closeMenus(null);
+    pycmd('lsa:open:' + b.dataset.open);
+    return;
+  }
+  closeMenus(null);
+});
+
+document.getElementById('add-btn').addEventListener('click', function(){
+  pycmd('lsa:add');
 });
 </script>
 </body></html>

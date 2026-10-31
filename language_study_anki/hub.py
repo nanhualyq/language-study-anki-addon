@@ -18,6 +18,10 @@ CONTRACT with web/list.html and web/practice.html (keep both ends in sync):
     practice.html __MODE__, __LSA_DATA__  (practice payload, unchanged)
   Bridge commands (JS -> Python via pycmd):
     lsa:open:<note_id>:<mode>  list page -> enter practice (list page only)
+    lsa:add                    list page -> global add (article-management)
+    lsa:edit:<note_id>         list page -> edit that article in place
+    lsa:dup:<note_id>          list page -> duplicate that article as new
+    lsa:del:<note_id>          list page -> delete that article (confirm first)
     lsa:back                   practice page -> return to the list
     lsa:sel:<json|null>        practice: live text-selection update
     lsa:extract                practice: run extraction on the selection
@@ -340,6 +344,33 @@ class HubWindow(QMainWindow):
                 if page != "practice":
                     return
                 self.show_list()
+            elif cmd == "lsa:add" or cmd.startswith(
+                ("lsa:edit:", "lsa:dup:", "lsa:del:")
+            ):
+                # Article lifecycle actions (spec: article-management).
+                # List-page commands like lsa:open: a stale click after a
+                # page swap must do nothing.
+                if page != "list":
+                    return
+                from . import article_actions
+
+                if cmd == "lsa:add":
+                    self._refresh_when_closed(
+                        article_actions.add_article(self.mw, self)
+                    )
+                    return
+                _, action, nid_s = cmd.split(":", 2)
+                nid = int(nid_s)
+                if action == "edit":
+                    self._refresh_when_closed(
+                        article_actions.edit_article(self.mw, self, nid)
+                    )
+                elif action == "dup":
+                    self._refresh_when_closed(
+                        article_actions.duplicate_article(self.mw, self, nid)
+                    )
+                elif article_actions.delete_article(self.mw, self, nid):
+                    self.show_list()  # deletion completes immediately
             elif page != "practice" or self._practice is None:
                 # Stale practice command after a swap to the list: one page
                 # guard covers sel / extract / play alike.
@@ -358,6 +389,30 @@ class HubWindow(QMainWindow):
                 self._practice.play_line(idx)
         except Exception:
             print("language_study_anki: bridge error:\n" + traceback.format_exc())
+
+    def _refresh_when_closed(self, dlg) -> None:
+        """Re-render the list when an action dialog closes (spec:
+        practice-hub → List refreshes after an action).
+
+        AddCards and EditCurrent both end their close path with
+        ``deferred_delete_and_garbage_collect`` (verified against Anki
+        26.8.1), so the destroyed signal is the one reliable "closed"
+        notification for both dialog kinds. The re-render is guarded: a
+        dialog closed during profile shutdown must not touch the page."""
+        if dlg is None:
+            return
+
+        def on_closed(*_args) -> None:
+            try:
+                if self._page == "list":
+                    self.show_list()
+            except Exception:
+                print(
+                    "language_study_anki: action refresh failed:\n"
+                    + traceback.format_exc()
+                )
+
+        dlg.destroyed.connect(on_closed)
 
 
 # --------------------------------------------------------------- entry

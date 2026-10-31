@@ -11,7 +11,10 @@ package is imported FIRST (its init() skips Anki hook registration when aqt is
 absent), then a minimal `aqt.qt` stub is installed so `hub` imports cleanly.
 """
 
+import contextlib
+import io
 import json
+import os
 import sys
 import types
 import unittest
@@ -39,7 +42,9 @@ def _stub_aqt_qt() -> None:
 
 _stub_aqt_qt()
 
+from language_study_anki import article_actions  # noqa: E402
 from language_study_anki.hub import (  # noqa: E402
+    HubWindow,
     _progress_percent,
     list_html,
     list_payload,
@@ -304,6 +309,201 @@ class ListHtmlTests(unittest.TestCase):
         # ...and it must sit before any element that resolves URLs
         self.assertLess(html.index('<base href="/">'),
                         html.index('const D = '))
+
+
+class FakeSignal:
+    """Minimal stand-in for a Qt signal (dlg.destroyed in the refresh
+    wiring)."""
+
+    def __init__(self):
+        self.callbacks = []
+
+    def connect(self, cb):
+        self.callbacks.append(cb)
+
+    def emit(self):
+        for cb in self.callbacks:
+            cb()
+
+
+class FakeDialog:
+    def __init__(self):
+        self.destroyed = FakeSignal()
+
+
+class BridgeActionDispatchTests(unittest.TestCase):
+    """2.1: lsa:add / lsa:edit:<id> / lsa:dup:<id> / lsa:del:<id> route to
+    the article_actions handlers, reject bad ids like show_practice, and
+    wire list refreshes (spec: practice-hub -> Article row actions and
+    global add; article-management)."""
+
+    _HANDLERS = (
+        "add_article",
+        "edit_article",
+        "duplicate_article",
+        "delete_article",
+    )
+
+    def setUp(self):
+        self._saved = {n: getattr(article_actions, n) for n in self._HANDLERS}
+
+    def tearDown(self):
+        for name, fn in self._saved.items():
+            setattr(article_actions, name, fn)
+
+    def _hub(self, page="list", col=None):
+        # Skip the Qt constructor; only the bridge-relevant state matters.
+        h = HubWindow.__new__(HubWindow)
+        h._page = page
+        h.bridge_log = []
+        h.mw = types.SimpleNamespace(col=col) if col is not None else object()
+        h.refreshed = []
+        h.show_list = lambda: h.refreshed.append("list")
+        return h
+
+    def test_action_commands_route_to_handlers(self):
+        calls = []
+        dialogs = []
+
+        def make(kind):
+            def fn(mw, parent, *ids):
+                calls.append((kind,) + ids)
+                d = FakeDialog()
+                dialogs.append(d)
+                return d
+
+            return fn
+
+        article_actions.add_article = make("add")
+        article_actions.edit_article = make("edit")
+        article_actions.duplicate_article = make("dup")
+
+        def delete(mw, parent, nid):
+            calls.append(("del", nid))
+            return False
+
+        article_actions.delete_article = delete
+
+        h = self._hub()
+        h._on_bridge("lsa:add")
+        h._on_bridge("lsa:edit:7")
+        h._on_bridge("lsa:dup:8")
+        h._on_bridge("lsa:del:9")
+        self.assertEqual(
+            calls, [("add",), ("edit", 7), ("dup", 8), ("del", 9)]
+        )
+        # add/edit/dup dialogs are watched: closing one re-renders the list
+        self.assertEqual(len(dialogs), 3)
+        dialogs[0].destroyed.emit()
+        self.assertEqual(h.refreshed, ["list"])
+
+    def test_delete_confirm_refreshes_list_immediately(self):
+        article_actions.delete_article = lambda mw, parent, nid: True
+        h = self._hub()
+        h._on_bridge("lsa:del:3")
+        self.assertEqual(h.refreshed, ["list"])
+
+    def test_action_commands_are_list_page_only(self):
+        calls = []
+        for name in self._HANDLERS:
+            setattr(
+                article_actions,
+                name,
+                lambda *a, _n=name, **k: calls.append(_n),
+            )
+        h = self._hub(page="practice")
+        h._on_bridge("lsa:add")
+        h._on_bridge("lsa:edit:7")
+        h._on_bridge("lsa:dup:8")
+        h._on_bridge("lsa:del:9")
+        self.assertEqual(calls, [])
+
+    def test_unknown_id_and_non_article_rejected_like_show_practice(self):
+        notes = {5: FakeNote(content=content_of(4), Title="X")}
+        col = FakeCol(notes, order=[5])
+        h = self._hub(col=col)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            h._on_bridge("lsa:del:99")  # unknown id -> KeyError, swallowed
+        self.assertIn("KeyError", buf.getvalue())
+        self.assertEqual(h.refreshed, [])
+        # non-article note -> ValueError("not an article note"), swallowed
+        col.notes[6] = FakeNote(content="", note_type_name="Basic", Title="Y")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            h._on_bridge("lsa:del:6")
+        self.assertIn("not an article note", buf.getvalue())
+        self.assertEqual(h.refreshed, [])
+
+    def test_refresh_when_closed_watches_destroyed_and_guards_page(self):
+        h = self._hub(page="practice")
+        d = FakeDialog()
+        h._refresh_when_closed(d)
+        d.destroyed.emit()
+        self.assertEqual(h.refreshed, [])  # not on the list page
+        h._page = "list"
+        d.destroyed.emit()
+        self.assertEqual(h.refreshed, ["list"])
+        h._refresh_when_closed(None)  # no dialog -> no-op
+
+
+class ListActionUiTests(unittest.TestCase):
+    """2.2: per-row "..." menu entries and the page-level Add button."""
+
+    def test_row_menu_entries_emit_action_commands(self):
+        html = list_html(
+            {"rows": [{"id": 7, "title": "T", "cover": "", "pcts": {}}]}
+        )
+        for frag in (
+            "data-act=\"lsa:edit:' + r.id",
+            "data-act=\"lsa:dup:' + r.id",
+            "data-act=\"lsa:del:' + r.id",
+        ):
+            self.assertIn(frag, html)
+        self.assertIn("Duplicate as New", html)
+        self.assertIn("data-menu=", html)  # the "..." toggle button
+
+    def test_menu_lives_outside_title(self):
+        # the self-test's list probe reads .title textContent exactly
+        html = list_html(
+            {"rows": [{"id": 7, "title": "T", "cover": "", "pcts": {}}]}
+        )
+        self.assertIn('<div class="titlerow"><div class="title">', html)
+        self.assertIn("'</div>' + menu", html)  # title closes before the menu
+
+    def test_menu_popup_hidden_state_wins(self):
+        # The popup is toggled via the HTML hidden attribute, but
+        # .menu-pop's author-level display:flex outranks the UA
+        # [hidden]{display:none} rule — without this guard the menu is
+        # permanently visible (real regression, caught by review).
+        html = list_html({"rows": []})
+        self.assertIn(".menu-pop[hidden]", html)
+
+    def test_add_button_always_rendered_outside_row_list(self):
+        html = list_html({"rows": []})  # empty state, too
+        self.assertIn('id="add-btn"', html)
+        self.assertIn("pycmd('lsa:add')", html)
+        # outside #list -> rendered whether or not rows exist
+        self.assertLess(
+            html.index('id="add-btn"'), html.index('<div id="list">')
+        )
+
+
+class ContractCommentTests(unittest.TestCase):
+    """2.3: every action command string appears on both sides of the
+    hub.py <-> web/list.html bridge contract."""
+
+    def test_action_commands_present_on_both_sides(self):
+        base = os.path.join(
+            os.path.dirname(__file__), "..", "language_study_anki"
+        )
+        with open(os.path.join(base, "hub.py"), encoding="utf-8") as f:
+            hub_src = f.read()
+        with open(os.path.join(base, "web", "list.html"), encoding="utf-8") as f:
+            html_src = f.read()
+        for cmd in ("lsa:add", "lsa:edit:", "lsa:dup:", "lsa:del:"):
+            self.assertIn(cmd, hub_src, cmd)
+            self.assertIn(cmd, html_src, cmd)
 
 
 if __name__ == "__main__":

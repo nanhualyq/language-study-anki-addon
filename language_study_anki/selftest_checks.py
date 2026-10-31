@@ -8,9 +8,11 @@ Each check has signature ``fn(mw, report, done)`` — must set
 from __future__ import annotations
 
 import inspect
+import time
 import traceback
 
-from . import provisioning
+from . import article_actions, provisioning
+from .progress import PROGRESS_FIELDS
 from .selftest import after_delay
 from .suspension import SUSPENDED_QUEUE, ensure_note_suspended
 
@@ -390,6 +392,482 @@ def check_add_dialog_set_note(mw, report, done) -> None:
         done()
 
 
+def _note_exists(col, nid: int) -> bool:
+    try:
+        col.get_note(nid)
+        return True
+    except Exception:
+        # Anki's Collection.get_note raises a backend error (not always
+        # KeyError) for a removed note — any error means "not there".
+        return False
+
+
+def _read_fields(note, names) -> dict:
+    """Field snapshot; adopted note types may lack fields, which reads as
+    None (same belt-and-braces the extract flow uses)."""
+    out = {}
+    for name in names:
+        try:
+            out[name] = note[name]
+        except KeyError:
+            out[name] = None
+    return out
+
+
+def _click_confirm_button(box, yes: bool) -> None:
+    """Answer a visible QMessageBox (Yes/No, localized) for the delete
+    confirmation; falls back to accept()/reject()."""
+    keywords = ("yes", "是") if yes else ("no", "否", "cancel", "取消")
+    for b in box.buttons():
+        if any(k in b.text().lower() for k in keywords):
+            b.click()
+            return
+    if yes:
+        box.accept()
+    else:
+        box.reject()
+
+
+def _ensure_crud_fixture(col, title: str, **fields) -> int:
+    """Create an article fixture note for the CRUD checks (unique titles
+    per run keep add/duplicate finds unambiguous)."""
+    model = provisioning.ensure_article_notetype(col)
+    note = col.new_note(model)
+    note["Title"] = title
+    note["Content"] = "Alpha<br>Beta<br>Gamma"
+    note["Translation"] = "甲<br>乙<br>丙"
+    note["Url"] = "https://example.com/lsa-crud"
+    for name, value in fields.items():
+        try:
+            note[name] = value
+        except KeyError:
+            pass
+    col.add_note(note, article_actions.current_deck_id(col))
+    ensure_note_suspended(note)
+    return int(note.id)
+
+
+def check_article_edit(mw, report, done) -> None:
+    """Row-action edit (spec: article-management -> Edit an article in
+    place; design D2): the EditCurrent dialog must hold the article note
+    (guards the mw.reviewer.card seam), and the close-save path must keep
+    the note id, the progress fields and the suspended card."""
+    result = report["detail"] = {}
+    dlg = None
+    try:
+        col = mw.col
+        nid = _ensure_crud_fixture(col, "LSA edit fixture", ProgReading="1")
+        note = col.get_note(nid)
+        before_progress = _read_fields(note, PROGRESS_FIELDS.values())
+        result["note_id_before"] = nid
+        result["progress_before"] = before_progress
+
+        dlg = article_actions.edit_article(mw, mw, nid)
+        result["dialog"] = type(dlg).__name__ if dlg is not None else None
+        if dlg is None:
+            report["ok"] = False
+            result["fail"] = "no dialog"
+            done()
+            return
+
+        state = {"tries": 0}
+
+        def close_and_verify() -> None:
+            # Closing exercises the in-place save path (closeEvent ->
+            # call_after_note_saved); the spec assertions are the
+            # post-conditions it must not break.
+            try:
+                dlg.close()
+            except Exception:
+                result["close_error"] = traceback.format_exc()
+            after_delay(600, verify)
+
+        def verify() -> None:
+            try:
+                cur = col.get_note(nid)
+                after_progress = _read_fields(cur, PROGRESS_FIELDS.values())
+                queues = [
+                    col.get_card(c).queue for c in col.card_ids_of_note(nid)
+                ]
+                result["note_id_after"] = int(cur.id)
+                result["progress_after"] = after_progress
+                result["card_queues"] = queues
+                report["ok"] = (
+                    result["note_id_after"] == nid
+                    and after_progress == before_progress
+                    and bool(queues)
+                    and all(q == SUSPENDED_QUEUE for q in queues)
+                )
+            except Exception:
+                report["ok"] = False
+                result["verify_error"] = traceback.format_exc()
+            done()
+
+        def poll_ready() -> None:
+            ed_note = getattr(getattr(dlg, "editor", None), "note", None)
+            if ed_note is not None:
+                result["editor_note_id"] = getattr(ed_note, "id", None)
+                try:
+                    holds = (
+                        int(ed_note.id) == nid
+                        and ed_note["Title"] == "LSA edit fixture"
+                    )
+                except Exception:
+                    holds = False
+                if holds:
+                    after_delay(300, close_and_verify)  # let it settle
+                    return
+            state["tries"] += 1
+            if state["tries"] > 30:
+                report["ok"] = False
+                result["fail"] = (
+                    "editor never held the article note (seam broken?)"
+                )
+                try:
+                    dlg.close()
+                except Exception:
+                    pass
+                done()
+                return
+            after_delay(200, poll_ready)
+
+        after_delay(300, poll_ready)
+    except Exception:
+        report["ok"] = False
+        result["error"] = traceback.format_exc()
+        if dlg is not None:
+            try:
+                dlg.close()
+            except Exception:
+                pass
+        done()
+
+
+def check_article_add(mw, report, done) -> None:
+    """Row-action add (spec: article-management -> Add an article): the
+    Add dialog opens on a fresh, EMPTY LSA-Article note; driving it to
+    confirmation creates a note carrying the entered values, with empty
+    progress fields and a suspended card. The Svelte editor refuses
+    synthetic keystrokes (retired editor_roundtrip note), so "the user
+    typed values" is simulated through the dialog's own set_note — the
+    same mechanism check_add_dialog_set_note drives."""
+    result = report["detail"] = {}
+    dlg = None
+    try:
+        col = mw.col
+        provisioning.provision(col)  # idempotent; ensures LSA-Article
+        model = provisioning.ensure_article_notetype(col)
+        deck_id = article_actions.current_deck_id(col)
+        known_before = set(col.find_notes(f'"note:{provisioning.ARTICLE_NOTE_TYPE}"'))
+        unique = f"LSA added {int(time.time() * 1000)}"
+
+        dlg = article_actions.add_article(mw, mw)
+        result["dialog"] = type(dlg).__name__ if dlg is not None else None
+        if dlg is None:
+            report["ok"] = False
+            result["fail"] = "no dialog"
+            done()
+            return
+
+        state = {"tries": 0}
+        typed_fields = {"Title": unique, "Content": "Delta<br>Epsilon"}
+
+        def poll_added(tries: int) -> None:
+            try:
+                fresh = [
+                    int(n)
+                    for n in col.find_notes(
+                        f'"note:{provisioning.ARTICLE_NOTE_TYPE}"'
+                    )
+                    if int(n) not in known_before
+                ]
+                if fresh and tries < 20:
+                    nid = fresh[0]
+                    cur = col.get_note(nid)
+                    got = _read_fields(cur, provisioning.ARTICLE_FIELDS)
+                    progress = _read_fields(cur, PROGRESS_FIELDS.values())
+                    queues = [
+                        col.get_card(c).queue for c in col.card_ids_of_note(nid)
+                    ]
+                    result["new_note_id"] = nid
+                    result["new_note_fields"] = got
+                    result["progress_empty"] = all(
+                        not v for v in progress.values()
+                    )
+                    result["card_queues"] = queues
+                    report["ok"] = (
+                        all(got.get(k) == v for k, v in typed_fields.items())
+                        and result["progress_empty"]
+                        and bool(queues)
+                        and all(q == SUSPENDED_QUEUE for q in queues)
+                    )
+                    _close_add_dialog(dlg, done)
+                    return
+                if tries >= 20:
+                    result["fail"] = "note never appeared after add click"
+                    report["ok"] = False
+                    _close_add_dialog(dlg, done)
+                    return
+            except Exception:
+                report["ok"] = False
+                result["verify_error"] = traceback.format_exc()
+                _close_add_dialog(dlg, done)
+                return
+            after_delay(300, lambda: poll_added(tries + 1))
+
+        def click_add() -> None:
+            btn_attr, btn = _find_add_button(dlg)
+            result["add_button"] = btn_attr
+            if btn is None:
+                report["ok"] = False
+                result["fail"] = "no add button"
+                _close_add_dialog(dlg, done)
+                return
+            btn.click()
+            after_delay(400, lambda: poll_added(0))
+
+        def poll_typed() -> None:
+            ed_note = getattr(getattr(dlg, "editor", None), "note", None)
+            try:
+                held = ed_note is not None and ed_note["Title"] == unique
+            except Exception:
+                held = False
+            if held:
+                after_delay(300, click_add)
+                return
+            state["tries"] += 1
+            if state["tries"] > 30:
+                report["ok"] = False
+                result["fail"] = "editor never held the typed note"
+                _close_add_dialog(dlg, done)
+                return
+            after_delay(200, poll_typed)
+
+        def type_and_confirm() -> None:
+            # Stand-in for the user's typing: hand the dialog the filled
+            # note through its public set_note, then drive to confirmation.
+            typed = col.new_note(model)
+            typed["Title"] = unique
+            typed["Content"] = typed_fields["Content"]
+            result["typed"] = _set_note_any(dlg, typed, deck_id)
+            state["tries"] = 0
+            after_delay(300, poll_typed)
+
+        def poll_ready() -> None:
+            ed_note = getattr(getattr(dlg, "editor", None), "note", None)
+            if ed_note is not None:
+                # Spec: the add dialog never prefills — all fields empty.
+                empty = {}
+                for name in provisioning.ARTICLE_FIELDS:
+                    try:
+                        empty[name] = not ed_note[name]
+                    except KeyError:
+                        empty[name] = True
+                result["prefill_empty"] = empty
+                result["editor_note_type"] = ed_note.note_type()["name"]
+                if all(empty.values()):
+                    after_delay(300, type_and_confirm)
+                    return
+                report["ok"] = False
+                result["fail"] = "add dialog was prefilled"
+                _close_add_dialog(dlg, done)
+                return
+            state["tries"] += 1
+            if state["tries"] > 30:
+                report["ok"] = False
+                result["fail"] = "editor never held the add note"
+                _close_add_dialog(dlg, done)
+                return
+            after_delay(200, poll_ready)
+
+        after_delay(300, poll_ready)
+    except Exception:
+        report["ok"] = False
+        result["error"] = traceback.format_exc()
+        if dlg is not None:
+            _close_add_dialog(dlg, done)  # done() after teardown
+        else:
+            done()
+
+
+def check_article_duplicate(mw, report, done) -> None:
+    """Row-action duplicate as new (spec: article-management -> Duplicate
+    an article as new): the Add dialog opens prefilled from the source —
+    ` (Copy)` title, copied fields, EMPTY progress — and confirming
+    creates the copy while the source stays untouched."""
+    result = report["detail"] = {}
+    dlg = None
+    try:
+        col = mw.col
+        stamp = int(time.time() * 1000)
+        src_id = _ensure_crud_fixture(
+            col, f"LSA dup source {stamp}", ProgReading="1"
+        )
+        src = col.get_note(src_id)
+        src_before = _read_fields(src, provisioning.ARTICLE_FIELDS)
+        copy_title = f"LSA dup source {stamp} (Copy)"
+
+        dlg = article_actions.duplicate_article(mw, mw, src_id)
+        result["dialog"] = type(dlg).__name__ if dlg is not None else None
+        if dlg is None:
+            report["ok"] = False
+            result["fail"] = "no dialog"
+            done()
+            return
+
+        state = {"tries": 0}
+        expected = dict(src_before)
+        expected["Title"] = copy_title
+        for name in PROGRESS_FIELDS.values():
+            expected[name] = ""
+
+        def poll_added(tries: int) -> None:
+            try:
+                found = col.find_notes(f'Title:"{copy_title}"')
+                if found and tries < 20:
+                    nid = int(next(iter(found)))
+                    cur = col.get_note(nid)
+                    after = _read_fields(cur, provisioning.ARTICLE_FIELDS)
+                    queues = [
+                        col.get_card(c).queue for c in col.card_ids_of_note(nid)
+                    ]
+                    src_now = _read_fields(
+                        col.get_note(src_id), provisioning.ARTICLE_FIELDS
+                    )
+                    result["copy_fields"] = after
+                    result["card_queues"] = queues
+                    result["source_unchanged"] = src_now == src_before
+                    report["ok"] = (
+                        after == expected
+                        and bool(queues)
+                        and all(q == SUSPENDED_QUEUE for q in queues)
+                        and src_now == src_before
+                    )
+                    _close_add_dialog(dlg, done)
+                    return
+                if tries >= 20:
+                    result["fail"] = "copy never appeared after add click"
+                    report["ok"] = False
+                    _close_add_dialog(dlg, done)
+                    return
+            except Exception:
+                report["ok"] = False
+                result["verify_error"] = traceback.format_exc()
+                _close_add_dialog(dlg, done)
+                return
+            after_delay(300, lambda: poll_added(tries + 1))
+
+        def click_add() -> None:
+            btn_attr, btn = _find_add_button(dlg)
+            result["add_button"] = btn_attr
+            if btn is None:
+                report["ok"] = False
+                result["fail"] = "no add button"
+                _close_add_dialog(dlg, done)
+                return
+            btn.click()
+            after_delay(400, lambda: poll_added(0))
+
+        def poll_ready() -> None:
+            """Prefill probe: the dialog must hold the copy values (spec:
+            Duplicate an article as new)."""
+            ed_note = getattr(getattr(dlg, "editor", None), "note", None)
+            if ed_note is not None:
+                got = _read_fields(ed_note, provisioning.ARTICLE_FIELDS)
+                result["prefill"] = got
+                if got == expected:
+                    after_delay(300, click_add)
+                    return
+                report["ok"] = False
+                result["fail"] = "duplicate prefill mismatch"
+                _close_add_dialog(dlg, done)
+                return
+            state["tries"] += 1
+            if state["tries"] > 30:
+                report["ok"] = False
+                result["fail"] = "editor never held the duplicate note"
+                _close_add_dialog(dlg, done)
+                return
+            after_delay(200, poll_ready)
+
+        after_delay(300, poll_ready)
+    except Exception:
+        report["ok"] = False
+        result["error"] = traceback.format_exc()
+        if dlg is not None:
+            _close_add_dialog(dlg, done)  # done() after teardown
+        else:
+            done()
+
+
+def check_article_delete(mw, report, done) -> None:
+    """Row-action delete (spec: article-management -> Delete an article):
+    declining the confirmation leaves the note; confirming removes the
+    note and its cards. The modal question is answered by a scheduled
+    pump (same pattern as _close_add_dialog's discard prompt)."""
+    result = report["detail"] = {}
+    try:
+        from aqt.qt import QApplication, QMessageBox
+
+        col = mw.col
+        title = f"LSA delete fixture {int(time.time() * 1000)}"
+        nid = _ensure_crud_fixture(col, title)
+        result["fixture"] = {"nid": nid, "title": title}
+
+        def answer_confirm(yes: bool, then) -> None:
+            def pump() -> None:
+                for w in QApplication.topLevelWidgets():
+                    if isinstance(w, QMessageBox) and w.isVisible():
+                        result.setdefault("answered", []).append(
+                            "yes" if yes else "no"
+                        )
+                        _click_confirm_button(w, yes)
+                        after_delay(250, then)
+                        return
+                after_delay(200, pump)
+
+            after_delay(150, pump)
+
+        def after_confirm() -> None:
+            try:
+                result["removed_after_confirm"] = not _note_exists(col, nid)
+                try:
+                    result["cards_after_confirm"] = col.card_ids_of_note(nid)
+                except Exception:
+                    result["cards_after_confirm"] = []
+                report["ok"] = (
+                    result.get("decline_returned") is False
+                    and result.get("survived_decline") is True
+                    and result.get("confirm_returned") is True
+                    and result["removed_after_confirm"]
+                    and not result["cards_after_confirm"]
+                )
+            except Exception:
+                report["ok"] = False
+                result["verify_error"] = traceback.format_exc()
+            done()
+
+        def phase_confirm() -> None:
+            answer_confirm(True, after_confirm)
+            result["confirm_returned"] = article_actions.delete_article(
+                mw, mw, nid
+            )
+
+        def after_decline() -> None:
+            result["survived_decline"] = _note_exists(col, nid)
+            phase_confirm()
+
+        # Phase 1: decline -> nothing happens.
+        answer_confirm(False, after_decline)
+        result["decline_returned"] = article_actions.delete_article(
+            mw, mw, nid
+        )
+    except Exception:
+        report["ok"] = False
+        result["error"] = traceback.format_exc()
+        done()
+
+
 def check_database_hygiene(mw, report, done) -> None:
     """Task 1.5: Check Database / empty-cards report stays clean for articles."""
     result = report["detail"] = {}
@@ -446,6 +924,10 @@ CHECKS = [
     ("provision_and_adopt", check_provision_and_adopt),
     ("article_suspension", check_article_suspension),
     ("add_dialog_set_note", check_add_dialog_set_note),
+    ("article_edit", check_article_edit),
+    ("article_add", check_article_add),
+    ("article_duplicate", check_article_duplicate),
+    ("article_delete", check_article_delete),
     # editor_roundtrip retired from the automated suite: the Svelte editor
     # refuses synthetic activation (evidence: activate→ce=null,
     # rich-inserted:false). Task 1.4 was verified by a REAL manual edit —
