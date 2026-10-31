@@ -930,17 +930,17 @@ def check_extract_all_modes(mw, report, done) -> None:
 
 
 # ---------------------------------------------------------------------- \
-# gray learned-row style (change: gray-learned-row-style)
+# dark learned-row style (change: dark-learned-row-style)
 # ----------------------------------------------------------------------
 
 
 def check_learned_style(mw, report, done) -> None:
-    """gray-learned-row-style: learned rows carry a gray background band.
+    """dark-learned-row-style: learned rows carry a dark background band.
 
-    Verifies the spec delta: gray tint perceivable in Listening mode (where a
-    closed learned row shows no text), full opacity + unchanged line-number
-    color, toggle/play/selection/extract on a learned row, live graying after
-    an extract, and no tint without progress.
+    Verifies the spec delta: dark tint perceivable in Listening mode (where a
+    closed learned row shows no text), white primary text, full opacity +
+    unchanged line-number color, toggle/play/selection/extract on a learned
+    row, live darkening after an extract, and no tint without progress.
     """
     from .practice_dialog import open_dialog
     from aqt.qt import QApplication
@@ -948,8 +948,8 @@ def check_learned_style(mw, report, done) -> None:
     col = mw.col
     art = _ensure_long_article(col)
     result = report["detail"] = {}
-    result["live_gray"] = {}
-    GRAY = "rgb(241, 241, 242)"  # #f1f1f2 learned-row tint
+    result["live_dark"] = {}
+    DARK = "rgb(51, 51, 51)"  # #333 learned-row tint
     state = {}
 
     # -- Stage A: listening, progress 15 (learned rows show NO text) -------
@@ -981,6 +981,7 @@ def check_learned_style(mw, report, done) -> None:
         "learned: document.querySelectorAll('.line.learned').length,"
         "learnedBg: getComputedStyle(lr).backgroundColor,"
         "unlearnedBg: getComputedStyle(ur).backgroundColor,"
+        "learnedPrimaryColor: getComputedStyle(p).color,"
         "learnedOpacity: getComputedStyle(lr).opacity,"
         "unlearnedOpacity: getComputedStyle(ur).opacity,"
         "lnLearned: getComputedStyle(lr.querySelector('.ln')).color,"
@@ -1006,9 +1007,11 @@ def check_learned_style(mw, report, done) -> None:
         d["ok"] = (
             d["total"] == len(LINES12)
             and d["learned"] == 15
-            # gray band perceivable with no text; unlearned rows untinted
-            and d["learnedBg"] == GRAY
-            and d["unlearnedBg"] != GRAY
+            # dark band perceivable with no text; unlearned rows untinted
+            and d["learnedBg"] == DARK
+            and d["unlearnedBg"] != DARK
+            # primary text renders white on the dark band
+            and d["learnedPrimaryColor"] == "rgb(255, 255, 255)"
             # no opacity reduction; line-number color unchanged
             and d["learnedOpacity"] == "1"
             and d["unlearnedOpacity"] == "1"
@@ -1050,7 +1053,7 @@ def check_learned_style(mw, report, done) -> None:
         result["reading_band"] = d
         d["ok"] = (
             d["learned"] == 15
-            and d["learnedBg"] == GRAY
+            and d["learnedBg"] == DARK
             and d["primary"] != "none"
             and d["pf"] == "15/40"
         )
@@ -1092,11 +1095,11 @@ def check_learned_style(mw, report, done) -> None:
     def ev_b3(d, visible_adds):
         d["ok"] = (
             d["hasLearnedClass"]
-            and d["bg"] == GRAY
+            and d["bg"] == DARK
             and d["pf"] == "20/40"
         )
-        result["live_gray"]["ok"] = d["ok"]
-        result["live_gray"]["detail"] = d
+        result["live_dark"]["ok"] = d["ok"]
+        result["live_dark"]["detail"] = d
         result["extract"]["ok"] = (
             result["extract"]["add_opened"]
             and result["extract"]["progress"] == 20
@@ -1133,7 +1136,7 @@ def check_learned_style(mw, report, done) -> None:
     def ev_c(payload):
         d = json.loads(payload)
         result["no_progress"] = d
-        d["ok"] = d["learned"] == 0 and d["bg1"] != GRAY and d["pf"] == "0/40"
+        d["ok"] = d["learned"] == 0 and d["bg1"] != DARK and d["pf"] == "0/40"
         try:
             state["dlg_c"].close()
         except Exception:
@@ -1141,7 +1144,7 @@ def check_learned_style(mw, report, done) -> None:
         report["ok"] = all(
             result.get(k, {}).get("ok")
             for k in ("listening", "reading_band", "extract",
-                      "live_gray", "no_progress")
+                      "live_dark", "no_progress")
         )
         done()
 

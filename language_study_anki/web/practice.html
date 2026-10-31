@@ -30,10 +30,19 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 #toolbar .field { color: #888; font-size: 12px; }
 .line { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start;
   border-bottom: 1px solid #f0f0f0; }
-/* Learned rows: light gray background band instead of reduced opacity.
+/* Learned rows: dark gray band with light text instead of reduced opacity.
    Opacity is a subtractive signal — in Listening mode a closed row has
    almost nothing to fade — and it would also dim this row's own tint. */
-.line.learned { background: #f1f1f2; }
+.line.learned { background: #333; }
+/* Light-on-dark overrides for the row's own chrome (the page-level rules
+   assume a light background). Higher-specificity selectors, so source
+   order vs. the base rules does not matter. Line number and play button
+   keep their colors: #bbb line numbers stay legible on #333. */
+.line.learned .primary { color: #fff; }
+.line.learned .secondary { color: #bbb; }
+.line.learned .twisty { color: #aaa; }
+.line.learned .twisty:hover { background: #4a4a4a; }
+.line.learned.open .twisty { color: #eee; }
 /* Per-row disclosure control (HTML <details>-style). The ONLY way to reveal
    hidden per-line content: clicking the row itself never toggles anything,
    so selecting/clicking text can no longer hide the line by accident. */
