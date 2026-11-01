@@ -16,6 +16,17 @@
       lsa:back             return to the Hub's article list page
     Callback (Python -> JS):
       window.markLearnedUpTo(n)   mark lines 1..n as learned, update counter
+    Keyboard layer (change: add-vim-keyboard-navigation; specs:
+    practice-dialog -> Line cursor and keyboard movement / Keyboard text
+    selection and extract / Keyboard line reveal and playback / Keyboard
+    return and keymap help): a page-local vim-style cursor — j/k/gg/G line
+    cursor, h/l/w/b/e char cursor, v/V visual selection realized as a DOM
+    selection so the lsa:sel pipeline serves it unchanged, Enter reveal,
+    p/Space TTS play, second `v` cancels the selection (Escape is
+    deliberately UNBOUND — Anki injects its own Escape -> pycmd("close")
+    -> onEsc handler that closes the Hub window and cannot be blocked
+    from page script; see design D11), q back, ? keymap overlay. Adds no
+    bridge commands; the bare `a` extract shortcut is unchanged.
 -->
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -77,15 +88,56 @@ body.mode-writing .line.open .secondary.source { display: block; }
 #toolbar kbd { display: inline-block; padding: 1px 5px; border: 1px solid #ccc;
   border-bottom-width: 2px; border-radius: 3px; background: #f7f7f7;
   font-family: inherit; font-size: 10px; color: #555; }
+/* Vim keyboard layer (change: add-vim-keyboard-navigation). Purely
+   additive: no existing element is restructured, so the self-test's DOM
+   probes keep matching. The cursor is signaled by the accent bar (an
+   inset box shadow that draws inside the row, independent of background)
+   plus the caret, so it NEVER touches the row background — a learned
+   line keeps its #333 dark band (and the dark-row self-test's computed
+   background) whether or not the cursor is on it. */
+.line.kcursor { box-shadow: inset 3px 0 0 #3b82f6; }
+/* The caret is a thin blinking BAR only — deliberately NOT a character
+   background (user report: a filled char looked like a one-character
+   selection, hard to tell apart). A selection is a filled band; the
+   cursor is a bar. */
+.caret { box-shadow: -2px 0 0 #3b82f6;
+  animation: lsa-caret-blink 1.1s step-end infinite; }
+.caret.at-end { box-shadow: 2px 0 0 #3b82f6; }  /* caret after last char */
+@keyframes lsa-caret-blink { 50% { box-shadow: none; } }
+/* Keyboard and mouse selections on both light rows and the dark learned
+   band (design risk: low-contrast ::selection). */
+::selection { background: #93b8f5; color: #111; }
+#keys { position: fixed; right: 14px; bottom: 14px; z-index: 30; max-width:
+  460px; background: #fff; border: 1px solid #ccc; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); padding: 10px 14px;
+  font-size: 12px; color: #333; line-height: 1.9; }
+#keys[hidden] { display: none; }
+#keys h4 { margin: 0 0 4px; font-size: 12px; }
+#keys .cols { display: flex; gap: 20px; }
+#keys kbd { display: inline-block; padding: 0 4px; border: 1px solid #ccc;
+  border-bottom-width: 2px; border-radius: 3px; background: #f7f7f7;
+  font-family: inherit; font-size: 10px; color: #555; }
 </style></head>
 <body class="mode-__MODE__">
 <div id="toolbar">
   <button id="back" title="Back to article list">&#8592;</button>
   <strong id="mode-name">__MODE__</strong>
   <span class="field" id="pf"></span>
-  <span class="hint">select text &amp; press <kbd>a</kbd> to extract</span>
+  <span class="hint">select &amp; press <kbd>a</kbd> · <kbd>V</kbd> then <kbd>a</kbd> whole line · <kbd>?</kbd> keys</span>
 </div>
 <div id="app"></div>
+<div id="keys" hidden>
+  <h4>Keyboard</h4>
+  <div class="cols"><div>
+    <kbd>j</kbd>/<kbd>k</kbd> line · <kbd>gg</kbd>/<kbd>G</kbd> first/last<br>
+    <kbd>h</kbd>/<kbd>l</kbd> char · <kbd>w</kbd>/<kbd>b</kbd>/<kbd>e</kbd> word<br>
+    <kbd>v</kbd> select from cursor · <kbd>V</kbd> whole line<br>
+    <kbd>v</kbd> again cancels · <kbd>a</kbd> extracts &amp; clears
+  </div><div>
+    <kbd>Enter</kbd> reveal · <kbd>p</kbd>/<kbd>Space</kbd> play<br>
+    <kbd>q</kbd> back to list · <kbd>?</kbd> close this help
+  </div></div>
+</div>
 <script>
 const D = __LSA_DATA__;
 /* Progress counter: <learned>/<total>, clamped so it can never exceed the
@@ -243,12 +295,321 @@ document.addEventListener('selectionchange', function(){
   sendSel(computeSel());
 });
 
-/* ---- bare `a` extract shortcut (no modifiers) ---- */
+/* ---- keyboard layer (change: add-vim-keyboard-navigation) ----
+   Vim-style cursor over the rendered lines, entirely page-local: every
+   action reuses an existing bridge command, and a visual selection is
+   realized as a DOM selection so the lsa:sel -> lsa:extract pipeline
+   serves keyboard and mouse selections alike (design D2). Only plain keys
+   are bound — AnkiWebView may intercept modifier combinations (D3).
+   The bare `a` extract shortcut is preserved exactly. */
+const keysEl = document.getElementById('keys');
+function keysToggle(show){
+  keysEl.hidden = show === undefined ? !keysEl.hidden : !show;
+}
+
+/* Cursor state lives at script scope — NOT inside the empty-article
+   block below — because the keydown listener (also outside that block)
+   closes over it. `let` declarations are block-scoped and would NOT be
+   hoisted out of the block, so keeping them here is required. */
+/* Cursor line starts at line 1 (top of the article); the caret and
+   accent bar mark the position, so the cursor never needs to touch the
+   row background (which the learned dark band owns). */
+let cur = 1;
+let col = 0;        /* char offset within the cursor line (0..len) */
+let visual = null;  /* {anchor} while a v/V selection is active (one line) */
+let gPending = false;   /* pending `g` for the gg chord */
+let caretLive = false;  /* the caret appears on first key use only — the
+                           self-test's mouse probes build a Range from
+                           .sel-area's firstChild and expect pristine
+                           text on page load */
+
+if (D.lines.length > 0) {
+  function rowEl(n){ return app.querySelector('[data-line="' + n + '"]'); }
+  function curRow(){ return rowEl(cur); }
+  function curArea(){
+    const r = curRow();
+    return r ? r.querySelector('.sel-area') : null;
+  }
+  /* The text the char cursor and selection operate on: the .sel-area
+     content — the TRANSLATION in Writing mode, the source elsewhere. */
+  function selText(n){
+    if (D.mode === 'writing' && hasTrans) return D.translations[n - 1] || '';
+    return D.lines[n - 1] || '';
+  }
+  function selActive(){
+    const s = window.getSelection();
+    return !!(s && s.rangeCount > 0 && !s.isCollapsed);
+  }
+
+  /* Word model (design D7): ASCII runs are words; EVERY CJK character is
+     its own word (vim-style), so `v` on a Chinese line selects one
+     character, never the whole line; other non-space chars are
+     single-char words. */
+  const WORD_RE = /[A-Za-z0-9_]/;
+  function isWord(c){ return !!c && WORD_RE.test(c); }
+  function isSpace(c){ return c !== undefined && c !== '' && /\s/.test(c); }
+  function nextWordStart(t, p){
+    let i = Math.min(p, t.length);
+    if (i < t.length && isWord(t[i])) {
+      while (i < t.length && isWord(t[i])) i++;
+    } else if (i < t.length && !isSpace(t[i])) {
+      i++;  /* punctuation: single-char run */
+    }
+    while (i < t.length && isSpace(t[i])) i++;
+    return Math.min(i, t.length);
+  }
+  function wordEnd(t, p){
+    let i = Math.min(p, t.length) + 1;
+    while (i < t.length && isSpace(t[i])) i++;
+    if (i >= t.length) return Math.max(0, t.length - 1);
+    if (isWord(t[i])) {
+      while (i + 1 < t.length && isWord(t[i + 1])) i++;
+    }
+    return i;
+  }
+  function wordBack(t, p){
+    let i = Math.min(p, t.length) - 1;
+    while (i > 0 && isSpace(t[i])) i--;
+    if (i <= 0) return 0;
+    if (isWord(t[i])) {
+      while (i > 0 && isWord(t[i - 1])) i--;
+    }
+    return i;
+  }
+
+  function clearCaret(){
+    for (const sp of Array.from(app.querySelectorAll('.caret'))) {
+      const parent = sp.parentNode;
+      if (!parent) continue;
+      if (sp.firstChild) parent.replaceChild(sp.firstChild, sp);
+      parent.normalize();
+    }
+  }
+  function renderLine(){
+    for (const el of Array.from(app.querySelectorAll('.line.kcursor')))
+      el.classList.remove('kcursor');
+    const r = curRow();
+    if (r) r.classList.add('kcursor');
+  }
+  function renderCaret(){
+    clearCaret();
+    /* D6: an active selection IS the highlight; rewriting the text node
+       under it would destroy it. Stay pristine until first key use. */
+    if (!caretLive || selActive()) return;
+    const ar = curArea();
+    const t = selText(cur);
+    if (!ar || !t.length) return;
+    if (ar.childNodes.length !== 1 || ar.firstChild.nodeType !== 3) return;
+    const at = Math.max(0, Math.min(col, t.length));
+    const atEnd = at >= t.length;   /* caret after the last char */
+    const idx = atEnd ? t.length - 1 : at;
+    const tn = ar.firstChild;
+    tn.splitText(idx);
+    const tn2 = tn.nextSibling;     /* [idx, len) */
+    const cs = document.createElement('span');
+    cs.className = atEnd ? 'caret at-end' : 'caret';
+    if (atEnd) {
+      if (tn2.length > 1) tn2.splitText(tn2.length - 1);
+      const tail = tn2.nextSibling || tn2;
+      ar.insertBefore(cs, tail);
+      cs.appendChild(tail);
+    } else {
+      ar.insertBefore(cs, tn2);
+      cs.appendChild(tn2);
+    }
+  }
+  function render(){ renderLine(); renderCaret(); }
+  function scrollToCur(){
+    const r = curRow();
+    if (!r) return;
+    const b = r.getBoundingClientRect();
+    const TOP = 56;   /* sticky toolbar + margin */
+    if (b.top < TOP) window.scrollBy(0, b.top - TOP);
+    else if (b.bottom > window.innerHeight - 8)
+      window.scrollBy(0, b.bottom - (window.innerHeight - 8));
+  }
+
+  function setVisual(a, b){
+    const ar = curArea();
+    if (!ar) return;
+    clearCaret();
+    if (ar.childNodes.length !== 1 || ar.firstChild.nodeType !== 3) return;
+    const node = ar.firstChild;
+    const lo = Math.max(0, Math.min(a, node.length));
+    const hi = Math.max(lo, Math.min(b, node.length));
+    const s = window.getSelection();
+    if (!s) return;
+    if (hi <= lo) { s.removeAllRanges(); return; }
+    s.removeAllRanges();
+    s.setBaseAndExtent(node, lo, node, hi);  /* -> selectionchange -> lsa:sel */
+  }
+  function extendVisual(){
+    if (!visual) return;
+    /* col is the INCLUSIVE cursor character; the DOM range end is
+       exclusive, so extend through the cursor char (+1). */
+    const t = selText(cur);
+    const a = visual.anchor;
+    if (col >= a) setVisual(a, Math.min(col + 1, t.length));
+    else setVisual(col, Math.min(a + 1, t.length));
+  }
+  function cancelSelection(){
+    visual = null;
+    const s = window.getSelection();
+    if (s) s.removeAllRanges();   /* selectionchange -> lsa:sel: null */
+    render();
+  }
+  /* Listening hides the primary text until the row opens (design D8). */
+  function revealForSelect(){
+    if (D.mode !== 'listening') return;
+    const r = curRow();
+    if (r && !r.classList.contains('open')) setOpen(r, true);
+  }
+  function goto(n){
+    /* Line movement DROPS an active visual selection (user behavior:
+       the extract contract is single-line, so re-selecting the new line
+       wholesale was surprising — moving away just cancels). The caret
+       stays at its character position (vim preserves the column). */
+    if (visual) cancelSelection();
+    cur = Math.max(1, Math.min(D.lines.length, n));
+    render();
+    scrollToCur();
+  }
+  function moveCol(delta){
+    col = Math.max(0, Math.min(selText(cur).length, col + delta));
+    if (visual) extendVisual();
+    render();
+  }
+  function moveWord(kind){
+    const t = selText(cur);
+    if (!t.length) return;
+    col = kind === 'w' ? nextWordStart(t, col)
+        : kind === 'b' ? wordBack(t, col)
+        : wordEnd(t, col);
+    if (visual) extendVisual();
+    render();
+  }
+  function toggleReveal(){
+    const r = curRow();
+    if (r) setOpen(r, !r.classList.contains('open'));
+  }
+
+  /* Mouse selection syncs the cursor (design D6): a drag-select moves
+     cur/col to the selection's line start, so j continues from where the
+     mouse left off. While a visual selection is active the keyboard owns
+     the cursor and this listener stays out of the way. */
+  document.addEventListener('selectionchange', function(){
+    if (visual) return;
+    const s = window.getSelection();
+    if (!s || s.isCollapsed || s.rangeCount === 0) return;
+    const r = s.getRangeAt(0);
+    let el = r.commonAncestorContainer;
+    if (el.nodeType === 3) el = el.parentElement;
+    const row = el && el.closest ? el.closest('.line') : null;
+    if (!row || !row.dataset.line) return;
+    const area = row.querySelector('.sel-area');
+    if (!area) return;
+    const full = document.createRange();
+    full.selectNodeContents(area);
+    const a = full.cloneRange();
+    try { a.setEnd(r.startContainer, r.startOffset); } catch (err) { return; }
+    cur = +row.dataset.line;
+    col = a.toString().length;
+    renderLine();   /* no caret: the selection defers it (D6) */
+  });
+
+  render();   /* line cursor only; the caret awaits first key use */
+}
+
+/* The keydown listener is registered OUTSIDE the empty-article guard so
+   that `a` / `?` / Esc / `q` keep working on an empty article too; the
+   line-dependent branches bail at the `D.lines.length === 0` guard below
+   before any block-scoped cursor state is touched. */
 document.addEventListener('keydown', function(e){
-  if ((e.key === 'a' || e.key === 'A') &&
-      !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  /* bare `a` extract shortcut (no modifiers) — unchanged */
+  if ((k === 'a' || k === 'A') && !e.shiftKey) {
     e.preventDefault();
     pycmd('lsa:extract');
+    /* `a` CONSUMES the selection: the extract command is sent first
+       (Python captures the selection synchronously in run_extract),
+       then the highlight is dropped — a stray second `a` cannot
+       double-extract, and the post-extract state is predictable. */
+    if (D.lines.length > 0) cancelSelection();
+    return;
+  }
+  if (k === '?') { e.preventDefault(); keysToggle(); return; }
+  /* Escape is deliberately UNBOUND (design D11): Anki injects its own
+     page-level Escape -> pycmd("close") -> onEsc handler AFTER our
+     script that closes the Hub window; page-side preventDefault cannot
+     block a separate listener. Cancel selection = second `v`. */
+  if (!keysEl.hidden) return;   /* overlay open: every other key is inert */
+  if (k === 'q') { e.preventDefault(); pycmd('lsa:back'); return; }
+  if (D.lines.length === 0) return;
+  caretLive = true;
+  if (k === 'Enter') { e.preventDefault(); toggleReveal(); return; }
+  if (k === 'p' || k === ' ') {
+    /* consumed even where playback does not apply (reading/writing) so
+       Space never scrolls the page out from under the cursor */
+    e.preventDefault();
+    if (D.mode === 'listening' || D.mode === 'speaking') {
+      pycmd('lsa:play:' + cur);
+    }
+    return;
+  }
+  if (k === 'v' || k === 'V') {
+    e.preventDefault();
+    /* second `v` cancels the active visual selection (vim-ish toggle;
+       Escape, which would cancel, is unbound — see D11) */
+    if (k === 'v' && visual) { cancelSelection(); return; }
+    revealForSelect();
+    const t = selText(cur);
+    if (t.length) {
+      let a = 0, b = 0;
+      if (k === 'V') {
+        b = t.length;
+      } else {
+        /* charwise: vim `v` starts collapsed on the cursor character —
+           no automatic word selection (that is what the `e`/`w`/`l`
+           motions are for; a bare word pick would be vim's `viw`) */
+        a = Math.min(col, t.length - 1);
+        b = a + 1;
+      }
+      visual = {anchor: a};
+      col = Math.max(a, b - 1);
+      setVisual(a, b);
+    } else {
+      visual = null;
+    }
+    render();
+    return;
+  }
+  if (k === 'j' || k === 'k' || k === 'G' || k === 'g') {
+    e.preventDefault();
+    if (k === 'g') {
+      if (gPending) { gPending = false; goto(1); }
+      else {
+        gPending = true;
+        setTimeout(function(){ gPending = false; }, 600);
+      }
+      return;
+    }
+    gPending = false;
+    if (k === 'j') goto(cur + 1);
+    else if (k === 'k') goto(cur - 1);
+    else goto(D.lines.length);   /* G: last line */
+    return;
+  }
+  gPending = false;
+  if (k === 'h' || k === 'l') {
+    e.preventDefault();
+    moveCol(k === 'h' ? -1 : 1);
+    return;
+  }
+  if (k === 'w' || k === 'b' || k === 'e') {
+    e.preventDefault();
+    moveWord(k);
+    return;
   }
 });
 </script>

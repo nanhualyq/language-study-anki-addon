@@ -1151,6 +1151,431 @@ def check_learned_style(mw, report, done) -> None:
     open_listening()
 
 
+def _keys_js(ks) -> str:
+    """JS that dispatches synthetic key events on the page (the same
+    KeyboardEvent pattern check_extract_all_modes uses for `a`)."""
+    return "(function(){%s;return 'fired';})()" % "".join(
+        "document.dispatchEvent(new KeyboardEvent('keydown',{key:%s,"
+        "bubbles:true,cancelable:true}));" % json.dumps(k)
+        for k in ks
+    )
+
+
+_JS_KBD_LIST = (
+    "(function(){"
+    "function ke(k){document.dispatchEvent(new KeyboardEvent('keydown',"
+    "{key:k,bubbles:true,cancelable:true}));}"
+    # keymap overlay toggles on and off without touching page state
+    "ke('?'); var ovShow=!document.getElementById('keys').hidden;"
+    "ke('?'); var ovHide=document.getElementById('keys').hidden;"
+    # m opens the focused row's menu; a second m closes it again (toggle;
+    # Escape is deliberately unbound — Anki's injected onEsc closes the
+    # window, design D11)
+    "ke('m'); var menuOpen=!!document.querySelector('.menu-pop:not([hidden])');"
+    "ke('m');"
+    "var menuClosed=!document.querySelector('.menu-pop:not([hidden])');"
+    # skill column then rows: j must PRESERVE the skill column (spec)
+    "ke('l');"
+    "{jkeys}"
+    "var rows=document.querySelectorAll('.row');"
+    "var kr=document.querySelector('.krow');"
+    "var midIdx=kr?Array.prototype.indexOf.call(rows,kr):-1;"
+    "var ms=kr&&kr.querySelector('.skill.kskill');"
+    "var midName=ms?ms.querySelector('.name').textContent:'';"
+    # h wraps: index 1 -> 0 -> 3 (Writing)
+    "ke('h'); ke('h');"
+    "var ws=kr&&kr.querySelector('.skill.kskill');"
+    "var wrapName=ws?ws.querySelector('.name').textContent:'';"
+    # digit 4 = direct skill pick (Writing), same entry point as a click
+    "ke('4');"
+    "var fs=document.querySelector('.krow .skill.kskill');"
+    "var finName=fs?fs.querySelector('.name').textContent:'';"
+    "var open=fs?fs.dataset.open:'';"
+    "var id=kr?+kr.dataset.id:0;"
+    "return JSON.stringify({rows:rows.length, ovShow:ovShow, ovHide:ovHide,"
+    "menuOpen:menuOpen, menuClosed:menuClosed,"
+    "midIdx:midIdx, midName:midName, wrapName:wrapName, finName:finName,"
+    "open:open, id:id});})()"
+)
+
+_JS_KBD_PRACTICE = (
+    "(function(){"
+    # first keyboard use materialises the caret; probe that it is a BAR
+    # only — no character background, so it cannot be mistaken for a
+    # selection band (user report on the caret-vs-selection confusion)
+    "function ke(k){document.dispatchEvent(new KeyboardEvent('keydown',"
+    "{key:k,bubbles:true,cancelable:true}));}"
+    "ke('l');"
+    "var cs=document.querySelector('.caret');"
+    "var caretBg=cs?getComputedStyle(cs).backgroundColor:'<none>';"
+    # vim parity: `v` starts collapsed on the CURSOR character (1 char,
+    # no auto word pick); the second `v` cancels it
+    "ke('v'); var vLen=getSelection().toString().length;"
+    "ke('v'); var s2=getSelection();"
+    "var vCancelled=(s2.rangeCount===0||s2.isCollapsed);"
+    "return JSON.stringify({"
+    "mode:(document.getElementById('mode-name')||{}).textContent,"
+    "cursor:!!document.querySelector('.line.kcursor'),"
+    "curline:(document.querySelector('.line.kcursor')||"
+    "{dataset:{}}).dataset.line,"
+    "counter:(document.getElementById('pf')||{}).textContent,"
+    "rows:document.querySelectorAll('.line').length,"
+    "caretBg:caretBg, vLen:vLen, vCancelled:vCancelled});})()"
+)
+
+_JS_KBD_SEL = (
+    "JSON.stringify({collapsed:getSelection().isCollapsed,"
+    "text:getSelection().toString()})"
+)
+
+_JS_KBD_JCANCEL = (
+    "JSON.stringify({collapsed:getSelection().isCollapsed,"
+    "curline:(document.querySelector('.line.kcursor')||"
+    "{dataset:{}}).dataset.line})"
+)
+
+_JS_KBD_REVEAL = (
+    "var r=document.querySelector('.line.kcursor');"
+    "var src=r&&r.querySelector('.secondary.source');"
+    "JSON.stringify({open:!!(r&&r.classList.contains('open')),"
+    "src:src?getComputedStyle(src).display:'<none>',"
+    "counter:document.getElementById('pf').textContent})"
+)
+
+_JS_KBD_BACK = (
+    "JSON.stringify({"
+    "rows:document.querySelectorAll('.row').length,"
+    "titleRows:Array.from(document.querySelectorAll('.row')).map("
+    "function(r){return r.querySelector('.title').textContent;}),"
+    "pcts:Array.from(document.querySelectorAll('.row')).map(function(r){"
+    "return Array.from(r.querySelectorAll('.skill')).map(function(s){"
+    "return s.querySelector('.pct').textContent;});})})"
+)
+
+
+def check_keyboard_nav(mw, report, done) -> None:
+    """add-vim-keyboard-navigation (specs: practice-hub -> List-page
+    keyboard navigation / List-page keyboard row actions; practice-dialog
+    -> Line cursor and keyboard movement / Keyboard text selection and
+    extract / Keyboard line reveal and playback / Keyboard return and
+    keymap help).
+
+    Drives both Hub pages with synthetic key events: list overlay +
+    row/skill cursor (column preservation, wrapping, direct digit) ->
+    Enter into practice -> V visual selection reaching Python -> Esc
+    cancel probe (design risk item: does Esc reach the page?) -> V+a
+    extract through the unchanged pipeline -> Enter reveal -> q back with
+    the refreshed percentage and no keypress progress writes.
+    """
+    from . import hub as hub_mod
+    from .practice_dialog import MODES
+    from .storage import field_to_lines
+    from aqt.qt import QApplication
+
+    col = mw.col
+    art = _ensure_long_article(col)
+    provisioning.provision(col)
+    result = report["detail"] = {}
+
+    # Deterministic cursor/extract line: earlier checks leave progress
+    # behind on the shared fixture (e.g. writing 14 from extract rounds).
+    for s in MODES:
+        _set_progress_raw(col, art, s, 0)
+    note = col.get_note(art)
+    total = len(field_to_lines(note["Content"]))
+    tr_lines = field_to_lines(note["Translation"])
+    result["total"] = total
+
+    # The exercised article's row position (newest first) — derived, not
+    # hardcoded: earlier checks create more articles than this one.
+    note_ids = sorted(
+        col.find_notes(f'"note:{provisioning.ARTICLE_NOTE_TYPE}"'),
+        reverse=True,
+    )
+    idx = note_ids.index(art)
+
+    # A leftover Hub from an earlier check must not mask ours.
+    if hub_mod._hub is not None:
+        try:
+            hub_mod._hub.close()
+        except Exception:
+            pass
+    hub = hub_mod.open_hub(None)
+    result["hub_opened"] = hub is not None
+    if hub is None:
+        report["ok"] = False
+        done()
+        return
+
+    def finish(ok: bool) -> None:
+        try:
+            hub.close()
+        except Exception:
+            pass
+        report["ok"] = ok
+        done()
+
+    def fail(stage: str, detail):
+        result[stage] = detail
+        finish(False)
+
+    # -- Stage 1: list page keys ----------------------------------------
+
+    def probe_list(payload):
+        try:
+            d = json.loads(payload)
+            result["list"] = d
+            ok = (
+                d["rows"] >= 1
+                and d["ovShow"] and d["ovHide"]          # overlay toggles
+                and d["menuOpen"] and d["menuClosed"]    # m opens, Esc closes
+                and d["midIdx"] == idx                   # j landed on art row
+                and d["midName"] == "Speaking"           # skill column kept
+                and d["wrapName"] == "Writing"           # h wraps 1->0->3
+                and d["finName"] == "Writing"            # digit 4 direct
+                and d["id"] == art
+                and d["open"].endswith(":writing")
+            )
+            if not ok:
+                fail("list_ok", False)
+                return
+            result["list_ok"] = True
+            # Enter navigates (setHtml swaps the page and would drop a
+            # pending result callback) — fire and probe from Python.
+            hub.web.page().runJavaScript(_keys_js(["Enter"]))
+            after_delay(1600, lambda: _js(hub, _JS_KBD_PRACTICE,
+                                          probe_practice))
+        except Exception:
+            fail("list_err", traceback.format_exc())
+
+    # -- Stage 2: practice page opened via keyboard ---------------------
+
+    def probe_practice(payload):
+        try:
+            d = json.loads(payload)
+            result["practice"] = d
+            ok = (
+                d["mode"] == "writing"
+                and d["cursor"]
+                and d["curline"] == "1"                 # cursor = progress+1
+                and d["counter"] == f"0/{total}"
+                and d["rows"] == total
+                # caret is a bar, never a filled character (selection look)
+                and d["caretBg"] == "rgba(0, 0, 0, 0)"
+                # v = vim: one char at the cursor, second v cancels
+                and d["vLen"] == 1
+                and d["vCancelled"]
+            )
+            if not ok:
+                fail("practice_ok", False)
+                return
+            result["practice_ok"] = True
+            hub.web.page().runJavaScript(_keys_js(["V"]))
+            after_delay(700, lambda: _js(hub, _JS_KBD_SEL, probe_visual))
+        except Exception:
+            fail("practice_err", traceback.format_exc())
+
+    # -- Stage 3: V selects the whole cursor line into Python -----------
+
+    def probe_visual(payload):
+        try:
+            d = json.loads(payload)
+            result["visual_js"] = d
+            sel = hub.selection
+            result["visual_py"] = sel
+            expected_text = tr_lines[0] if tr_lines else src_fallback(note)
+            ok = (
+                not d["collapsed"]
+                and d["text"] == expected_text
+                and isinstance(sel, dict)
+                and sel.get("line") == 1
+                and sel.get("start") == 0
+                and sel.get("text") == expected_text
+                and sel.get("end") == len(expected_text)
+            )
+            if not ok:
+                fail("visual_ok", False)
+                return
+            result["visual_ok"] = True
+            # Cancel probe: a SECOND `v` cancels the active visual
+            # selection (Escape is deliberately unbound — Anki's injected
+            # Escape->onEsc closes the window, design D11) -> collapsed
+            # selection and a null selection on the Python side.
+            hub.web.page().runJavaScript(_keys_js(["v"]))
+            after_delay(700, lambda: _js(hub, _JS_KBD_SEL, probe_cancel))
+        except Exception:
+            fail("visual_err", traceback.format_exc())
+
+    def probe_cancel(payload):
+        try:
+            d = json.loads(payload)
+            result["cancel_js"] = d
+            result["cancel_py"] = hub.selection
+            ok = d["collapsed"] and hub.selection is None
+            if not ok:
+                fail("cancel_ok", False)
+                return
+            result["cancel_ok"] = True
+            # Line movement must CANCEL an active visual selection (user
+            # behavior: the single-line extract contract makes
+            # whole-new-line re-selection surprising) — V then j ->
+            # collapsed selection, cursor on line 2.
+            hub.web.page().runJavaScript(_keys_js(["V", "j"]))
+            after_delay(700, lambda: _js(hub, _JS_KBD_JCANCEL,
+                                         probe_jcancel))
+        except Exception:
+            fail("cancel_err", traceback.format_exc())
+
+    def probe_jcancel(payload):
+        try:
+            d = json.loads(payload)
+            result["jcancel_js"] = d
+            result["jcancel_py"] = hub.selection
+            ok = (
+                d["collapsed"]
+                and d["curline"] == "2"
+                and hub.selection is None
+            )
+            if not ok:
+                fail("jcancel_ok", False)
+                return
+            result["jcancel_ok"] = True
+            # Back to line 1 and extract with `a` — the unchanged pipeline.
+            baseline = {
+                id(w)
+                for w in QApplication.topLevelWidgets()
+                if "Add" in type(w).__name__ and w.isVisible()
+            }
+            hub.web.page().runJavaScript(_keys_js(["k", "V"]))
+            after_delay(500, lambda: fire_extract(baseline))
+        except Exception:
+            fail("jcancel_err", traceback.format_exc())
+
+    # -- Stage 4: V + a extract (writing skips the lookup: fast) --------
+
+    def fire_extract(baseline):
+        state["baseline"] = baseline
+        hub.web.page().runJavaScript(_keys_js(["a"]))
+
+        def probe_acancel(payload):
+            # `a` CONSUMES the selection (D12): collapsed right after the
+            # keypress — the extract itself still sees the full span
+            # (Python captured it synchronously before the clear arrived).
+            try:
+                d = json.loads(payload)
+                result["acancel_js"] = d
+                result["acancel_ok"] = d["collapsed"]
+            except Exception:
+                result["acancel_ok"] = False
+            after_delay(2300, verify_extract)
+
+        after_delay(700, lambda: _js(hub, _JS_KBD_SEL, probe_acancel))
+
+    def visible_adds(baseline):
+        return {
+            id(w)
+            for w in QApplication.topLevelWidgets()
+            if "Add" in type(w).__name__ and w.isVisible()
+        } - baseline
+
+    def verify_extract():
+        new_add = visible_adds(state["baseline"])
+        entry = {
+            "add_opened": bool(new_add),
+            "progress": get_progress(col.get_note(art), "writing"),
+            "extract_log": list(getattr(hub, "extract_log", [])),
+        }
+        result["extract"] = entry
+        ok = (
+            bool(new_add)
+            and entry["progress"] == 1                  # wrote line 1
+            and "start:line=1" in " | ".join(entry["extract_log"])
+            and not any("ERR:" in e for e in entry["extract_log"])
+            and result.get("acancel_ok")                # selection consumed
+        )
+        if not ok:
+            fail("extract_ok", False)
+            return
+        result["extract_ok"] = True
+        if new_add:
+            target = next(
+                w for w in QApplication.topLevelWidgets() if id(w) in new_add
+            )
+            _close_add_dialog(target, after_extract)
+        else:
+            after_extract()
+
+    # -- Stage 5: Enter reveal on the next line -------------------------
+
+    def after_extract():
+        hub.web.page().runJavaScript(_keys_js(["j", "Enter"]))
+        after_delay(700, lambda: _js(hub, _JS_KBD_REVEAL, probe_reveal))
+
+    def probe_reveal(payload):
+        try:
+            d = json.loads(payload)
+            result["reveal"] = d
+            ok = (
+                d["open"]
+                and d["src"] != "none"                  # writing: source shown
+                and d["counter"] == f"1/{total}"        # reveal wrote nothing
+            )
+            if not ok:
+                fail("reveal_ok", False)
+                return
+            result["reveal_ok"] = True
+            state["progress_before_q"] = {
+                s: get_progress(col.get_note(art), s) for s in MODES
+            }
+            hub.web.page().runJavaScript(_keys_js(["q"]))
+            after_delay(1600, lambda: _js(hub, _JS_KBD_BACK, probe_back))
+        except Exception:
+            fail("reveal_err", traceback.format_exc())
+
+    # -- Stage 6: q back to the list ------------------------------------
+
+    def probe_back(payload):
+        try:
+            d = json.loads(payload)
+            result["back"] = d
+            after_q = {
+                s: get_progress(col.get_note(art), s) for s in MODES
+            }
+            pct = f"{int(1 * 100.0 / total + 0.5)}%"    # 1 of total lines
+            rows_ok = (
+                d["rows"] >= 1
+                and idx < len(d["pcts"])
+                and d["titleRows"][idx] == (note["Title"] or "")
+                and d["pcts"][idx][3] == pct            # Writing ring refreshed
+            )
+            ok = (
+                rows_ok
+                and hub.windowTitle() == hub_mod.LIST_TITLE
+                # the q keypress itself wrote nothing
+                and after_q == state["progress_before_q"]
+            )
+            if not ok:
+                fail("back_ok", False)
+                return
+            result["back_ok"] = True
+            finish(True)
+        except Exception:
+            fail("back_err", traceback.format_exc())
+
+    state = {}
+    after_delay(1400, lambda: _js(
+        hub, _JS_KBD_LIST.replace("{jkeys}", "ke('j');" * idx), probe_list
+    ))
+
+
+def src_fallback(note) -> str:
+    """First source line — only used when the fixture lacks translations."""
+    from .storage import field_to_lines
+
+    lines = field_to_lines(note["Content"])
+    return lines[0] if lines else ""
+
+
 CHECKS_EXTRA = [
     ("hub_list", check_hub_list),
     ("dialog_modes", check_dialog_modes),
@@ -1159,4 +1584,5 @@ CHECKS_EXTRA = [
     ("tts", check_tts),
     ("extract_all_modes", check_extract_all_modes),
     ("learned_style", check_learned_style),
+    ("keyboard_nav", check_keyboard_nav),
 ]

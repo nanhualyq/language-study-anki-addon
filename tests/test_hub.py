@@ -489,6 +489,79 @@ class ListActionUiTests(unittest.TestCase):
         )
 
 
+class KeyboardLayerTests(unittest.TestCase):
+    """Change add-vim-keyboard-navigation: the vim keyboard layer is
+    present in both templates, stays additive (existing DOM contracts
+    unbroken), and binds only plain keys (design D3 — AnkiWebView may
+    intercept modifier combinations)."""
+
+    def _tpl(self, name: str) -> str:
+        base = os.path.join(
+            os.path.dirname(__file__), "..", "language_study_anki", "web"
+        )
+        with open(os.path.join(base, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_list_keyboard_layer_present_and_additive(self):
+        html = self._tpl("list.html")
+        self.assertIn("document.addEventListener('keydown'", html)
+        for token in (
+            "krow", "kskill", "kact",       # focus classes
+            'id="keys"',                    # keymap overlay
+            "pycmd('lsa:open:' + sk.dataset.open)",  # same cmd as the click
+            "pycmd('lsa:add')",
+        ):
+            self.assertIn(token, html)
+        # the guarded pre-existing rules must survive the addition
+        self.assertIn(".menu-pop[hidden]", html)
+        self.assertIn('<base href="/">', html)
+
+    def test_practice_keyboard_layer_present_and_additive(self):
+        html = self._tpl("practice.html")
+        self.assertIn("document.addEventListener('keydown'", html)
+        for token in (
+            "kcursor", "caret", "at-end",    # cursor rendering
+            "setBaseAndExtent",              # visual = DOM selection (D2)
+            'id="keys"',
+            "lsa:play:", "lsa:back",
+        ):
+            self.assertIn(token, html)
+        # the bare-`a` extract shortcut survives unchanged
+        self.assertIn("pycmd('lsa:extract')", html)
+        # the toolbar hint advertises the keyboard layer (spec scenario)
+        self.assertIn("whole line", html)
+
+    def test_no_modifier_combos_bound(self):
+        # design D3: every binding is a plain key; no Ctrl/Meta/Alt combos.
+        # Modifiers are only ever READ (to bail out), never required.
+        for name in ("list.html", "practice.html"):
+            html = self._tpl(name)
+            self.assertIn("e.ctrlKey || e.metaKey || e.altKey", html, name)
+            for combo in ("ctrlKey: true", "metaKey: true", "altKey: true",
+                          "ctrl:true", "meta:true", "alt:true"):
+                self.assertNotIn(combo, html, (name, combo))
+
+    def test_escape_never_bound(self):
+        # design D11 (user report): Anki injects its own page-level
+        # Escape -> pycmd("close") -> onEsc handler AFTER our script that
+        # closes the Hub window; a separate listener cannot be blocked
+        # from page JS. The keyboard layer must therefore NOT bind
+        # Escape anywhere — cancellation uses second-`v` (practice) and
+        # second-`m` (list) toggles instead. Guard against re-adding it.
+        for name in ("list.html", "practice.html"):
+            html = self._tpl(name)
+            self.assertNotIn("k === 'Escape'", html, name)
+            self.assertNotIn("Key_Escape", html, name)
+
+    def test_caret_is_bar_only(self):
+        # user report: a caret character with a blue background read as a
+        # one-character selection. The caret rule must carry no background.
+        html = self._tpl("practice.html")
+        caret_rule = html.split(".caret {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("background", caret_rule)
+        self.assertIn("box-shadow", caret_rule)
+
+
 class ContractCommentTests(unittest.TestCase):
     """2.3: every action command string appears on both sides of the
     hub.py <-> web/list.html bridge contract."""

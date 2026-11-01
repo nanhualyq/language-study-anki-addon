@@ -33,6 +33,17 @@
     message instead of rows. The Add button sits above the list and is
     rendered whether or not rows exist.
 
+  Keyboard layer (change: add-vim-keyboard-navigation; specs: practice-hub
+  -> List-page keyboard navigation / List-page keyboard row actions): a
+  page-local vim-style cursor — j/k rows (skill column preserved), h/l
+  skills (wrapping), 1-4 direct skill, Enter/o open, A add, m/. row-menu
+  sub-state (j/k/Enter inside; pressing m/. again closes the menu,
+  however it was opened), ? keymap overlay. Escape is deliberately
+  UNBOUND — Anki injects its own Escape -> pycmd("close") -> onEsc
+  handler that closes the Hub window and cannot be blocked from page
+  script (design D11). Adds no bridge
+  commands: activation reuses the same lsa:* commands as the click path.
+
   Cover image URLs (Anki >= 2.1.50 media-server model):
     AnkiWebView.setHtml serves this page from
     http://127.0.0.1:<port>/_anki/legacyPageData?id=N, so a bare relative
@@ -110,10 +121,37 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 .skill .name { font-size: 11px; color: #666; }
 .empty { padding: 60px 20px; text-align: center; color: #888;
   font-size: 18px; }
+/* Vim keyboard layer (change: add-vim-keyboard-navigation). Purely
+   additive: focus classes ride on existing elements, so the self-test's
+   DOM probes keep matching. */
+.row.krow { border-color: #3b82f6; box-shadow: 0 0 0 1px rgba(59, 130, 246, .35); }
+.skill.kskill { background: #ececec; }   /* same look as :hover */
+.menu-pop button.kact { background: #ececec; }
+#keys { position: fixed; right: 14px; bottom: 14px; z-index: 30; max-width:
+  420px; background: #fff; border: 1px solid #ccc; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); padding: 10px 14px;
+  font-size: 12px; color: #333; line-height: 1.9; }
+#keys[hidden] { display: none; }
+#keys h4 { margin: 0 0 4px; font-size: 12px; }
+#keys .cols { display: flex; gap: 20px; }
+#keys kbd { display: inline-block; padding: 0 4px; border: 1px solid #ccc;
+  border-bottom-width: 2px; border-radius: 3px; background: #f7f7f7;
+  font-family: inherit; font-size: 10px; color: #555; }
 </style></head>
 <body>
 <div class="toolbar"><button id="add-btn">+ Add Article</button></div>
 <div id="list"></div>
+<div id="keys" hidden>
+  <h4>Keyboard</h4>
+  <div class="cols"><div>
+    <kbd>j</kbd>/<kbd>k</kbd> rows · <kbd>h</kbd>/<kbd>l</kbd> skills<br>
+    <kbd>1</kbd>–<kbd>4</kbd> pick skill<br>
+    <kbd>Enter</kbd>/<kbd>o</kbd> open focused skill
+  </div><div>
+    <kbd>A</kbd> add article · <kbd>m</kbd>/<kbd>.</kbd> row menu<br>
+    <kbd>m</kbd> again closes · <kbd>?</kbd> close this help
+  </div></div>
+</div>
 <script>
 const D = __LSA_DATA__;
 const ORDER = ["reading", "speaking", "listening", "writing"];
@@ -189,25 +227,163 @@ list.addEventListener('click', function(e){
     const willShow = pop.hidden;
     closeMenus(willShow ? pop : null);
     pop.hidden = !willShow;
+    // Keyboard sync: a mouse-opened menu is navigable and closeable by
+    // key too (user report: Esc must close the menu, not the window).
+    const host = mb.closest('.row');
+    const ri = host ? rowEls.indexOf(host) : -1;
+    kmenu = (willShow && ri >= 0) ? {pop: pop, index: 0} : null;
+    renderKbd();
     return;
   }
   const a = e.target.closest('[data-act]');
   if (a) {
     closeMenus(null);
+    kmenu = null;
     pycmd(a.dataset.act);
     return;
   }
   const b = e.target.closest('[data-open]');
   if (b) {
     closeMenus(null);
+    kmenu = null;
     pycmd('lsa:open:' + b.dataset.open);
     return;
   }
   closeMenus(null);
+  kmenu = null;
+  renderKbd();
 });
 
 document.getElementById('add-btn').addEventListener('click', function(){
   pycmd('lsa:add');
+});
+
+/* ---- keyboard layer (change: add-vim-keyboard-navigation) ----
+   Vim-style cursor over the rows, entirely page-local: activation reuses
+   the same lsa:* commands as the click path, and the menu sub-state
+   drives the EXISTING popup (design D5). Only plain keys are bound
+   (design D3). */
+const rowEls = Array.from(list.querySelectorAll('.row'));
+const keysEl = document.getElementById('keys');
+let krow = 0;        /* focused row index */
+let kskill = 0;      /* focused skill column (preserved across j/k) */
+let kmenu = null;    /* {pop, index} while a row menu is open */
+
+function menuEntries(pop){ return Array.from(pop.querySelectorAll('button')); }
+function renderKbd(){
+  if (kmenu && kmenu.pop.hidden) kmenu = null;   /* self-heal (closed by mouse) */
+  for (const r of list.querySelectorAll('.krow')) r.classList.remove('krow');
+  for (const s of list.querySelectorAll('.kskill')) s.classList.remove('kskill');
+  for (const b of list.querySelectorAll('.menu-pop button.kact'))
+    b.classList.remove('kact');
+  const row = rowEls[krow];
+  if (!row) return;
+  row.classList.add('krow');
+  const sk = row.querySelectorAll('.skill')[kskill];
+  if (sk) sk.classList.add('kskill');
+  if (kmenu) {
+    const es = menuEntries(kmenu.pop);
+    if (es[kmenu.index]) es[kmenu.index].classList.add('kact');
+  }
+}
+function openKbdMenu(){
+  const row = rowEls[krow];
+  if (!row) return;
+  const btn = row.querySelector('[data-menu]');
+  if (!btn) return;
+  closeMenus(null);
+  const pop = btn.nextElementSibling;
+  pop.hidden = false;
+  kmenu = {pop: pop, index: 0};
+  renderKbd();
+}
+function toggleKbdMenu(){
+  /* second `m`/`.` closes the open menu — keyboard- or mouse-opened
+     (kmenu is synced on mouse open too; Escape, which would close it,
+     is unbound — see D11) */
+  if (kmenu) {
+    kmenu = null;
+    closeMenus(null);
+    renderKbd();
+    return;
+  }
+  openKbdMenu();
+}
+function focusSkill(){
+  const row = rowEls[krow];
+  const sk = row && row.querySelectorAll('.skill')[kskill];
+  if (sk && sk.scrollIntoView) sk.scrollIntoView({block: 'nearest'});
+}
+renderKbd();   /* initial focus: first row, first skill */
+
+document.addEventListener('keydown', function(e){
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  if (k === '?') { e.preventDefault(); keysEl.hidden = !keysEl.hidden; return; }
+  /* Escape is deliberately UNBOUND (design D11): Anki injects its own
+     page-level Escape -> pycmd("close") -> onEsc handler AFTER our
+     script that closes the Hub window; page-side preventDefault cannot
+     block a separate listener. The menu closes via a second `m`. */
+  if (!keysEl.hidden) return;   /* overlay open: every other key is inert */
+  if (kmenu) {
+    /* Menu sub-state: j/k/Enter belong to the open menu; a second
+       m/. closes it (toggle); the row/skill keys are inert until it
+       closes (spec). */
+    const es = menuEntries(kmenu.pop);
+    if (k === 'm' || k === '.') { e.preventDefault(); toggleKbdMenu(); return; }
+    if (k === 'j' || k === 'k') {
+      e.preventDefault();
+      if (es.length) {
+        kmenu.index = (kmenu.index + (k === 'j' ? 1 : es.length - 1)) %
+                      es.length;
+        renderKbd();
+      }
+      return;
+    }
+    if (k === 'Enter') {
+      e.preventDefault();
+      const entry = es[kmenu.index];
+      kmenu = null;   /* the delegated click handler closes the menus */
+      if (entry) entry.click();
+      return;
+    }
+    return;
+  }
+  if (k === 'A') { e.preventDefault(); pycmd('lsa:add'); return; }
+  if (!rowEls.length) return;   /* empty list: cursor keys are inert */
+  if (k === 'j' || k === 'k') {
+    e.preventDefault();
+    krow = Math.max(0, Math.min(rowEls.length - 1,
+                                krow + (k === 'j' ? 1 : -1)));
+    renderKbd();
+    focusSkill();
+    return;
+  }
+  if (k === 'l' || k === 'h') {
+    e.preventDefault();
+    kskill = (kskill + (k === 'l' ? 1 : 3)) % 4;   /* wrap */
+    renderKbd();
+    focusSkill();
+    return;
+  }
+  if (k >= '1' && k <= '4') {
+    e.preventDefault();
+    kskill = +k - 1;
+    renderKbd();
+    focusSkill();
+    return;
+  }
+  if (k === 'Enter' || k === 'o') {
+    e.preventDefault();
+    const row = rowEls[krow];
+    const sk = row && row.querySelectorAll('.skill')[kskill];
+    if (sk) {
+      closeMenus(null);
+      pycmd('lsa:open:' + sk.dataset.open);   /* same as the click path */
+    }
+    return;
+  }
+  if (k === 'm' || k === '.') { e.preventDefault(); toggleKbdMenu(); return; }
 });
 </script>
 </body></html>
