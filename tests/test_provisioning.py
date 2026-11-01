@@ -247,9 +247,8 @@ class ProductionParityTest(unittest.TestCase):
         self.assertEqual(
             [f["name"] for f in m["flds"]],
             [
-                "Title", "Content", "Translation", "Url",
+                "Title", "Cover", "Content", "Translation", "Url",
                 "ProgListening", "ProgSpeaking", "ProgReading", "ProgWriting",
-                "Cover",
             ],
         )
         self.assertFalse(any(self._sticky(m).values()))  # none sticky

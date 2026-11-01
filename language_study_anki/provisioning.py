@@ -19,14 +19,17 @@ ARTICLE_NOTE_TYPE = "LSA-Article"
 EXTRACT_DECK = "English"
 EXTRACT_NOTE_TYPES = ["LSA-ReadWrite", "LSA-Listen", "LSA-Speak"]
 
-# Production is the source of truth (captured 2026-10-25). Field order below
-# matches it exactly; ``Cover`` is provisioned on every type including the
-# article. ``required_extract_fields`` returns the ordered production list —
+# Production is the source of truth (captured 2026-10-25). ``Cover`` is
+# provisioned on every type including the article, where it sits second,
+# right under ``Title``; existing collections are aligned manually by the
+# user via Anki's Fields dialog (no addon-side reorder).
+# ``required_extract_fields`` returns the ordered production list —
 # its additive-repair role only checks membership, never reorders.
 EXTRACT_FIELD_NAMES = ["Front", "Back", "Url", "Title", "Cover"]
 STICKY_EXTRACT_FIELDS = frozenset({"Front", "Back", "Url", "Title"})
 ARTICLE_FIELDS = [
     "Title",
+    "Cover",
     "Content",
     "Translation",
     "Url",
@@ -34,7 +37,6 @@ ARTICLE_FIELDS = [
     "ProgSpeaking",
     "ProgReading",
     "ProgWriting",
-    "Cover",
 ]
 # Audio extract types carry an extra phonetics field (reference behavior);
 # production places ``Phone`` third, right after ``Back``.

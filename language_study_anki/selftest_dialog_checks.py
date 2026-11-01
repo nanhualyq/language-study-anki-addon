@@ -29,11 +29,11 @@ COVER_VALUE = "cover-selftest.jpg"
 
 
 def _ensure_article_cover_field(col) -> bool:
-    """Add the user-maintained Cover field to LSA-Article if absent.
+    """Ensure the Cover field exists on LSA-Article.
 
-    The addon does NOT provision Cover on articles (proposal: it is user-
-    maintained); simulate the user's collection here so extraction has a
-    source value to copy. Returns True when the field exists afterwards.
+    New article types provision Cover (ARTICLE_FIELDS), but a pre-existing
+    adopted type may lack it; add it if absent so extraction has a source
+    value to copy. Returns True when the field exists afterwards.
     """
     mm = col.models
     model = mm.by_name(provisioning.ARTICLE_NOTE_TYPE)
