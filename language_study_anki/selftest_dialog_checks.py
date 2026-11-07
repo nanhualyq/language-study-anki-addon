@@ -566,7 +566,12 @@ def check_dialog_restore(mw, report, done) -> None:
         def probed(payload):
             d = json.loads(payload)
             expected = min(value, len(LINES12))
-            ok = d["learned"] == expected
+            # the line cursor must open in sync with the restored scroll
+            # position: the first line after the learned progress,
+            # clamped to the last line (spec: Line cursor and keyboard
+            # movement — "cursor = progress+1")
+            expected_cur = str(min(expected + 1, len(LINES12)))
+            ok = d["learned"] == expected and d["cur"] == expected_cur
             if value > 0:
                 ok = ok and d["scroll"] > 0
             else:
@@ -585,6 +590,8 @@ def check_dialog_restore(mw, report, done) -> None:
             " ? document.scrollingElement.scrollTop : 0)),"
             "scrollEl: (document.scrollingElement || {}).tagName || '?',"
             "learned: document.querySelectorAll('.line.learned').length,"
+            "cur:((document.querySelector('.line.kcursor')||"
+            "{dataset:{}}).dataset.line||''),"
             "total: document.querySelectorAll('.line').length,"
             "bodyH: document.body.scrollHeight"
             "})"

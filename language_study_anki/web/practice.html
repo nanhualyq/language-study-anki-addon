@@ -316,10 +316,18 @@ function keysToggle(show){
    block below — because the keydown listener (also outside that block)
    closes over it. `let` declarations are block-scoped and would NOT be
    hoisted out of the block, so keeping them here is required. */
-/* Cursor line starts at line 1 (top of the article); the caret and
-   accent bar mark the position, so the cursor never needs to touch the
-   row background (which the learned dark band owns). */
-let cur = 1;
+/* Cursor line starts at the first line AFTER the learned progress
+   (spec: practice-dialog -> Line cursor and keyboard movement) — the
+   row just below the one the open-restore scrolls to, so the cursor
+   and the restored scroll position begin in sync instead of the
+   cursor sitting on line 1 while the view is at the article's bottom.
+   No stored progress (or an empty article) keeps line 1; stored
+   progress at/past the article's end clamps to the last line, like
+   the scroll restore. The caret and accent bar mark the position, so
+   the cursor never needs to touch the row background (which the
+   learned dark band owns). */
+let cur = Math.max(1, Math.min((D.progress || 0) + 1,
+                               Math.max(1, D.lines.length)));
 let col = 0;        /* char offset within the cursor line (0..len) */
 let visual = null;  /* {anchor} while a v/V selection is active (one line) */
 let gPending = false;   /* pending `g` for the gg chord */
