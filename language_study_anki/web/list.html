@@ -35,10 +35,12 @@
 
   Keyboard layer (change: add-vim-keyboard-navigation; specs: practice-hub
   -> List-page keyboard navigation / List-page keyboard row actions): a
-  page-local vim-style cursor — j/k rows (skill column preserved), h/l
-  skills (wrapping), 1-4 direct skill, Enter/o open, A add, m/. row-menu
-  sub-state (j/k/Enter inside; pressing m/. again closes the menu,
-  however it was opened), ? keymap overlay. Escape is deliberately
+  page-local vim-style cursor — j/k rows (skill column preserved),
+  gg/G first/last row, h/l skills (wrapping), 1-4 direct skill,
+  Enter/o open, A add, PgUp/PgDn one screen with the row cursor
+  following (vim Ctrl-F/Ctrl-B parity), m/. row-menu sub-state (j/k/
+  Enter inside; pressing m/. again closes the menu, however it was
+  opened), ? keymap overlay. Escape is deliberately
   UNBOUND — Anki injects its own Escape -> pycmd("close") -> onEsc
   handler that closes the Hub window and cannot be blocked from page
   script (design D11). Adds no bridge
@@ -144,8 +146,9 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
 <div id="keys" hidden>
   <h4>Keyboard</h4>
   <div class="cols"><div>
-    <kbd>j</kbd>/<kbd>k</kbd> rows · <kbd>h</kbd>/<kbd>l</kbd> skills<br>
-    <kbd>1</kbd>–<kbd>4</kbd> pick skill<br>
+    <kbd>j</kbd>/<kbd>k</kbd> rows · <kbd>gg</kbd>/<kbd>G</kbd> first/last<br>
+    <kbd>h</kbd>/<kbd>l</kbd> skills · <kbd>1</kbd>–<kbd>4</kbd> pick skill<br>
+    <kbd>PgUp</kbd>/<kbd>PgDn</kbd> one screen<br>
     <kbd>Enter</kbd>/<kbd>o</kbd> open focused skill
   </div><div>
     <kbd>A</kbd> add article · <kbd>m</kbd>/<kbd>.</kbd> row menu<br>
@@ -268,6 +271,7 @@ const keysEl = document.getElementById('keys');
 let krow = 0;        /* focused row index */
 let kskill = 0;      /* focused skill column (preserved across j/k) */
 let kmenu = null;    /* {pop, index} while a row menu is open */
+let kgPending = false;   /* pending `g` for the gg chord */
 
 function menuEntries(pop){ return Array.from(pop.querySelectorAll('button')); }
 function renderKbd(){
@@ -314,12 +318,76 @@ function focusSkill(){
   const sk = row && row.querySelectorAll('.skill')[kskill];
   if (sk && sk.scrollIntoView) sk.scrollIntoView({block: 'nearest'});
 }
+
+/* PageUp/PageDown (spec: practice-hub -> List-page keyboard
+   navigation): page the view by one usable screen WITH the row cursor,
+   so the list can never scroll away from it. Vim Ctrl-F/Ctrl-B parity:
+   the scroll happens first and is MEASURED, then the cursor lands on
+   the edge of the NEW screen — the first visible row after PageDown
+   (pulled fully to the top edge, mirroring the practice page's
+   scrollToCur), the last FULLY visible row after PageUp. At the list's
+   edge — or when the list fits on one screen — nothing scrolls and the
+   keys are inert, so the cursor never teleports without a matching
+   scroll. */
+function pageMove(dir){
+  const TOP = 8, BOT = window.innerHeight - 8;
+  const H = Math.max(1, BOT - TOP);
+  const y0 = window.scrollY ||
+             (document.scrollingElement || {}).scrollTop || 0;
+  window.scrollBy(0, dir * H);
+  const y1 = window.scrollY ||
+             (document.scrollingElement || {}).scrollTop || 0;
+  if (y1 === y0) return;   /* no scroll available: cursor stays put */
+  let idx = -1;
+  if (dir > 0) {
+    for (let i = 0; i < rowEls.length; i++) {
+      if (rowEls[i].getBoundingClientRect().bottom > TOP) { idx = i; break; }
+    }
+  } else {
+    for (let i = rowEls.length - 1; i >= 0; i--) {
+      const b = rowEls[i].getBoundingClientRect();
+      if (b.top >= TOP && b.bottom <= BOT) { idx = i; break; }
+    }
+    if (idx < 0) {   /* no whole row fits (a row taller than the screen) */
+      for (let i = 0; i < rowEls.length; i++) {
+        if (rowEls[i].getBoundingClientRect().bottom > TOP) { idx = i; break; }
+      }
+    }
+  }
+  if (idx >= 0) {
+    krow = idx;
+    renderKbd();
+    /* PageDown can land on a row straddling the top edge: pull it to
+       the edge so the cursor row starts fully in view (vim shows whole
+       lines only). PageUp's landing row is fully visible by
+       construction; focusSkill then no-ops. */
+    const b = rowEls[idx].getBoundingClientRect();
+    if (dir > 0 && b.top < TOP) window.scrollBy(0, b.top - TOP);
+    focusSkill();
+  }
+}
 renderKbd();   /* initial focus: first row, first skill */
 
 document.addEventListener('keydown', function(e){
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key;
   if (k === '?') { e.preventDefault(); keysEl.hidden = !keysEl.hidden; return; }
+  /* PageUp/PageDown: page one screen WITH the row cursor (spec:
+     practice-hub -> List-page keyboard navigation; vim Ctrl-F/Ctrl-B
+     parity — PageDown lands on the new screen's first visible row,
+     PageUp on its last fully visible one). Consumed BEFORE the overlay
+     guard below: the list must never scroll with the cursor left
+     behind, and with the keymap open these keys are inert like every
+     other key. */
+  if (k === 'PageUp' || k === 'PageDown') {
+    e.preventDefault();
+    if (!keysEl.hidden) return;
+    if (kmenu) return;          /* row-menu sub-state: inert like row keys */
+    if (!rowEls.length) return; /* empty list: inert */
+    kgPending = false;   /* any other motion abandons a pending `gg` */
+    pageMove(k === 'PageDown' ? 1 : -1);
+    return;
+  }
   /* Escape is deliberately UNBOUND (design D11): Anki injects its own
      page-level Escape -> pycmd("close") -> onEsc handler AFTER our
      script that closes the Hub window; page-side preventDefault cannot
@@ -351,14 +419,33 @@ document.addEventListener('keydown', function(e){
   }
   if (k === 'A') { e.preventDefault(); pycmd('lsa:add'); return; }
   if (!rowEls.length) return;   /* empty list: cursor keys are inert */
-  if (k === 'j' || k === 'k') {
+  if (k === 'j' || k === 'k' || k === 'G' || k === 'g') {
     e.preventDefault();
-    krow = Math.max(0, Math.min(rowEls.length - 1,
-                                krow + (k === 'j' ? 1 : -1)));
+    if (k === 'g') {
+      /* gg chord (vim parity with the practice page): a second g
+         within the chord window jumps to the first row; any other key
+         or the timeout abandons it */
+      if (kgPending) {
+        kgPending = false;
+        krow = 0;
+      } else {
+        kgPending = true;
+        setTimeout(function(){ kgPending = false; }, 600);
+        return;
+      }
+      renderKbd();
+      focusSkill();
+      return;
+    }
+    kgPending = false;
+    if (k === 'G') krow = rowEls.length - 1;   /* G: last row */
+    else krow = Math.max(0, Math.min(rowEls.length - 1,
+                                     krow + (k === 'j' ? 1 : -1)));
     renderKbd();
     focusSkill();
     return;
   }
+  kgPending = false;   /* any other key abandons a pending `gg` */
   if (k === 'l' || k === 'h') {
     e.preventDefault();
     kskill = (kskill + (k === 'l' ? 1 : 3)) % 4;   /* wrap */

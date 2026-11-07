@@ -138,11 +138,19 @@ current collection state so rows and percentages reflect the result.
   moment, with percentages recomputed
 
 ### Requirement: List-page keyboard navigation
-The system SHALL provide vim-style keyboard navigation on the article-list page. A visible row cursor marks the focused row and a visible skill cursor marks the focused skill entry within that row. `j`/`k` move the row cursor down/up across rows, preserving the skill column; `h`/`l` move the skill cursor left/right across the focused row's four skill entries, wrapping at the edges; `1`–`4` move the skill cursor directly to Reading/Speaking/Listening/Writing. The initial focus is the first row's first skill entry. The focused row and skill SHALL be rendered distinctly from their unfocused state. On an empty list, cursor keys have no effect.
+The system SHALL provide vim-style keyboard navigation on the article-list page. A visible row cursor marks the focused row and a visible skill cursor marks the focused skill entry within that row. `j`/`k` move the row cursor down/up across rows, preserving the skill column; `gg`/`G` move the row cursor to the first/last row, also preserving the skill column; `h`/`l` move the skill cursor left/right across the focused row's four skill entries, wrapping at the edges; `1`–`4` move the skill cursor directly to Reading/Speaking/Listening/Writing. `PageUp`/`PageDown` page the view by one usable screen with the row cursor: the list scrolls one screen and the row cursor follows onto the edge of the new screen (the first visible row after `PageDown`, the last fully visible row after `PageUp`; vim `Ctrl-F`/`Ctrl-B` parity), with no effect at the list's top/bottom edge or when the list fits on one screen; they are inert while the keymap overlay or a row menu is open. The initial focus is the first row's first skill entry. The focused row and skill SHALL be rendered distinctly from their unfocused state. On an empty list, cursor keys have no effect.
 
 #### Scenario: Row and skill cursor movement
 - **WHEN** the user presses `j`, `k`, `h`, `l`, or a digit `1`–`4` on the list page
 - **THEN** the row and skill cursors update accordingly, the focused elements are visually distinct, and no other page state changes
+
+#### Scenario: `gg` and `G` jump to the list edges
+- **WHEN** the user presses `G` on a list of several rows, then `gg`
+- **THEN** the row cursor moves to the last row and then back to the first row, keeping the skill column and scrolling the target row into view, with no other page state changed
+
+#### Scenario: Page keys scroll with the row cursor
+- **WHEN** the user presses `PageDown` on a list longer than one screen
+- **THEN** the view advances one screen and the row cursor lands on the new screen's first visible row, and at the list's top or bottom edge the keys scroll nothing and move no cursor
 
 #### Scenario: Skill column preserved across rows
 - **WHEN** the user moves the skill cursor to the third skill of a row and then presses `j`

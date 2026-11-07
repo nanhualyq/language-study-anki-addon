@@ -27,8 +27,10 @@
     (Escape is deliberately UNBOUND — Anki injects its own Escape ->
     pycmd("close")
     -> onEsc handler that closes the Hub window and cannot be blocked
-    from page script; see design D11), q back, ? keymap overlay. Adds no
-    bridge commands; the bare `a` extract shortcut is unchanged.
+    from page script; see design D11), q back, ? keymap overlay,
+    PageUp/PageDown one screen with the line cursor following (vim
+    Ctrl-F/Ctrl-B parity). Adds no bridge commands; the bare `a`
+    extract shortcut is unchanged.
 -->
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -132,6 +134,7 @@ body.mode-writing .line.open .secondary.source { display: block; }
   <h4>Keyboard</h4>
   <div class="cols"><div>
     <kbd>j</kbd>/<kbd>k</kbd> line · <kbd>gg</kbd>/<kbd>G</kbd> first/last<br>
+    <kbd>PgUp</kbd>/<kbd>PgDn</kbd> one screen<br>
     <kbd>h</kbd>/<kbd>l</kbd> char · <kbd>w</kbd>/<kbd>b</kbd>/<kbd>e</kbd> word<br>
     <kbd>v</kbd> select from cursor · <kbd>V</kbd> whole line<br>
     <kbd>v</kbd> again cancels · <kbd>a</kbd> extracts &amp; clears
@@ -431,6 +434,45 @@ if (D.lines.length > 0) {
       window.scrollBy(0, b.bottom - (window.innerHeight - 8));
   }
 
+  /* PageUp/PageDown (spec: practice-dialog -> Line cursor and keyboard
+     movement): page the view by one usable screen WITH the cursor, so
+     the page can never scroll away from it. Vim Ctrl-F/Ctrl-B parity:
+     the scroll happens first and is MEASURED, then the cursor lands on
+     the edge of the NEW screen it reads from next — the first visible
+     line after PageDown (goto's scrollToCur pulls a top-straddling row
+     fully into view), the last FULLY visible line after PageUp (the web
+     view can cut a row in half at the edge; vim shows whole lines
+     only). At the article's edge — or when the article fits on one
+     screen — nothing scrolls and the keys are inert, so the cursor
+     never teleports without a matching scroll. */
+  function pageMove(dir){
+    const TOP = 56, BOT = window.innerHeight - 8;  /* sticky toolbar + margin */
+    const H = Math.max(1, BOT - TOP);
+    const y0 = window.scrollY ||
+               (document.scrollingElement || {}).scrollTop || 0;
+    window.scrollBy(0, dir * H);
+    const y1 = window.scrollY ||
+               (document.scrollingElement || {}).scrollTop || 0;
+    if (y1 === y0) return;   /* no scroll available: cursor stays put */
+    let best = 0;
+    if (dir > 0) {
+      for (let i = 1; i <= D.lines.length; i++) {
+        if (rowEl(i).getBoundingClientRect().bottom > TOP) { best = i; break; }
+      }
+    } else {
+      for (let i = D.lines.length; i >= 1; i--) {
+        const b = rowEl(i).getBoundingClientRect();
+        if (b.top >= TOP && b.bottom <= BOT) { best = i; break; }
+      }
+      if (!best) {   /* no whole row fits: a row taller than the screen */
+        for (let i = 1; i <= D.lines.length; i++) {
+          if (rowEl(i).getBoundingClientRect().bottom > TOP) { best = i; break; }
+        }
+      }
+    }
+    if (best) goto(best);
+  }
+
   function setVisual(a, b){
     const ar = curArea();
     if (!ar) return;
@@ -524,7 +566,7 @@ if (D.lines.length > 0) {
 
 /* The keydown listener is registered OUTSIDE the empty-article guard so
    that `a` / `?` / Esc / `q` keep working on an empty article too; the
-   line-dependent branches bail at the `D.lines.length === 0` guard below
+   line-dependent branches bail at a `D.lines.length === 0` guard
    before any block-scoped cursor state is touched. */
 document.addEventListener('keydown', function(e){
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -541,6 +583,22 @@ document.addEventListener('keydown', function(e){
     return;
   }
   if (k === '?') { e.preventDefault(); keysToggle(); return; }
+  /* PageUp/PageDown: page one screen WITH the line cursor (spec:
+     practice-dialog -> Line cursor and keyboard movement; vim Ctrl-F/
+     Ctrl-B parity — PageDown lands on the new screen's first visible
+     line, PageUp on its last fully visible one). Consumed BEFORE the
+     overlay guard below: the view must never scroll with the cursor
+     left behind, and with the keymap open these keys are inert like
+     every other key. */
+  if (k === 'PageUp' || k === 'PageDown') {
+    e.preventDefault();
+    if (!keysEl.hidden) return;
+    if (D.lines.length === 0) return;
+    caretLive = true;   /* first key use reveals the caret, as for j/k */
+    gPending = false;   /* any other motion abandons a pending `gg` */
+    pageMove(k === 'PageDown' ? 1 : -1);
+    return;
+  }
   /* Escape is deliberately UNBOUND (design D11): Anki injects its own
      page-level Escape -> pycmd("close") -> onEsc handler AFTER our
      script that closes the Hub window; page-side preventDefault cannot
