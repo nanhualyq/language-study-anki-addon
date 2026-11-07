@@ -1235,6 +1235,95 @@ _JS_KBD_SEL = (
     "text:getSelection().toString()})"
 )
 
+# count prefix + 0/$ line-edge probe (spec: Line cursor and keyboard
+# movement / Keyboard text selection and extract). Reads the script-scope
+# cursor state (col/cur are top-level `let` — global lexical bindings the
+# page's own runJavaScript can see) plus the toolbar badge. Stage A ends
+# with NO armed count and the cursor back on line 1 so the V stage below
+# is unaffected.
+_JS_KBD_COUNT = (
+    "(function(){"
+    "function ke(k){document.dispatchEvent(new KeyboardEvent('keydown',"
+    "{key:k,bubbles:true,cancelable:true}));}"
+    "var cnt=document.getElementById('cnt');"
+    # bare 0 = line start — the baseline every count below is measured from
+    "ke('0'); var col0=col;"
+    # 3w must land where three separate w presses land
+    "ke('3'); ke('w'); var col3w=col;"
+    "ke('0'); ke('w'); ke('w'); ke('w'); var colwww=col;"
+    # 1,0,l: the 0 extends the count (not the line-start motion) -> +10,
+    # badge reads 10 while armed and clears when l consumes it
+    "ke('0'); ke('1'); ke('0');"
+    "var badge10=cnt.textContent, badge10Shown=!cnt.hidden;"
+    "ke('l'); var col10=col, badgeAfterL=cnt.hidden;"
+    # $ then 0: absolute line end -> line start, never leaves the line
+    "ke('$'); var colEnd=col;"
+    "ke('0'); var colBack=col;"
+    # 99l / 99b: count clamps at the line boundaries, never leaves the line
+    "ke('9'); ke('9'); ke('l'); var colClampEnd=col;"
+    "ke('9'); ke('9'); ke('b'); var colClampStart=col;"
+    # count + j: the line-level key discards the count and moves ONE line
+    "ke('3'); var lineBeforeJ=cur;"
+    "ke('j'); var lineAfterJ=cur, badgeAfterJ=cnt.hidden;"
+    "ke('k'); var lineBack=cur;"
+    # v + 3w extends the selection exactly like v + w + w + w
+    "ke('0'); ke('v'); ke('3'); ke('w');"
+    "var selCountLen=getSelection().toString().length;"
+    "ke('v');"
+    "ke('0'); ke('v'); ke('w'); ke('w'); ke('w');"
+    "var selRefLen=getSelection().toString().length;"
+    "ke('v');"
+    # v then $ grows the selection from its anchor to the line end
+    "ke('0'); ke('v'); ke('$');"
+    "var selDollar=getSelection().toString().length;"
+    "ke('v');"
+    # v mid-line (anchor 4) then 0 grows back to the line start —
+    # anchor after cursor: covers anchor through cursor character
+    "ke('0'); ke('4'); ke('l'); ke('v'); ke('0');"
+    "var selZero=getSelection().toString().length;"
+    "ke('v');"
+    # keymap overlay lists the new keys (static HTML, read without opening)
+    "var keysTxt=document.getElementById('keys').textContent;"
+    "var keysHasCount=keysTxt.indexOf('count')>=0;"
+    "var keysHasEdge=keysTxt.indexOf('line start/end')>=0;"
+    "ke('0');"
+    "return JSON.stringify({col0:col0, col3w:col3w, colwww:colwww,"
+    " badge10:badge10, badge10Shown:badge10Shown, col10:col10,"
+    " badgeAfterL:badgeAfterL, colEnd:colEnd, colBack:colBack,"
+    " colClampEnd:colClampEnd, colClampStart:colClampStart,"
+    " lineBeforeJ:lineBeforeJ, lineAfterJ:lineAfterJ,"
+    " badgeAfterJ:badgeAfterJ, lineBack:lineBack,"
+    " selCountLen:selCountLen, selRefLen:selRefLen,"
+    " selDollar:selDollar, selZero:selZero,"
+    " keysHasCount:keysHasCount, keysHasEdge:keysHasEdge,"
+    " line:cur, col:col, badgeShown:!cnt.hidden});})()"
+)
+
+# badge expiry needs a REAL >1 s gap between two probes: arm a count,
+# wait it out from Python, then prove the badge is gone, the cursor did
+# NOT move, and the next w takes ONE step instead of three.
+_JS_KBD_COUNT_ARM = (
+    "(function(){"
+    "function ke(k){document.dispatchEvent(new KeyboardEvent('keydown',"
+    "{key:k,bubbles:true,cancelable:true}));}"
+    "var cnt=document.getElementById('cnt');"
+    "ke('0'); ke('3');"
+    "return JSON.stringify({badge:cnt.textContent, shown:!cnt.hidden,"
+    " col:col, line:cur});})()"
+)
+
+_JS_KBD_COUNT_EXPIRE = (
+    "(function(){"
+    "function ke(k){document.dispatchEvent(new KeyboardEvent('keydown',"
+    "{key:k,bubbles:true,cancelable:true}));}"
+    "var cnt=document.getElementById('cnt');"
+    "var expired=cnt.hidden && cnt.textContent==='';"
+    "var colBefore=col;"
+    "ke('w'); var colAfter=col;"
+    "return JSON.stringify({expired:expired, colBefore:colBefore,"
+    " colAfter:colAfter, badge:cnt.textContent});})()"
+)
+
 _JS_KBD_JCANCEL = (
     "JSON.stringify({collapsed:getSelection().isCollapsed,"
     "curline:(document.querySelector('.line.kcursor')||"
@@ -1378,10 +1467,90 @@ def check_keyboard_nav(mw, report, done) -> None:
                 fail("practice_ok", False)
                 return
             result["practice_ok"] = True
+            # count prefix / line-edge probe first (spec: Line cursor and
+            # keyboard movement), then the original V stage
+            _js(hub, _JS_KBD_COUNT, probe_count)
+        except Exception:
+            fail("practice_err", traceback.format_exc())
+
+    # -- Stage 2b: count prefix + 0/$ line-edge motions -----------------
+
+    def probe_count(payload):
+        try:
+            d = json.loads(payload)
+            result["count"] = d
+            t0 = tr_lines[0] if tr_lines else ""
+            ok = (
+                d["col0"] == 0                            # bare 0 = line start
+                and d["col3w"] == d["colwww"]             # 3w == w,w,w
+                and d["col3w"] > 0
+                and d["badge10"] == "10" and d["badge10Shown"]  # 0 extends count
+                and d["col10"] == min(10, len(t0))        # 10l, clamped at line end
+                and d["badgeAfterL"]                      # consumed with the motion
+                and d["colEnd"] == len(t0)                # $ = line end
+                and d["colBack"] == 0                     # 0 = line start
+                and d["colClampEnd"] == len(t0)           # 99l stops at line end
+                and d["colClampStart"] == 0               # 99b stops at line start
+                and d["lineBeforeJ"] == 1
+                and d["lineAfterJ"] == 2                  # count+j: ONE line down
+                and d["badgeAfterJ"]                      # ...and the count discarded
+                and d["lineBack"] == 1                    # ready for the V stage
+                and d["selCountLen"] == d["selRefLen"]    # v+3w == v+w,w,w
+                and d["selCountLen"] > 1
+                # v + $ extends anchor -> line end; v(4) + 0 grows back
+                # to the start (anchor after cursor, covers anchor+cursor)
+                and d["selDollar"] == len(t0)
+                and d["selZero"] == min(4 + 1, len(t0))
+                # overlay advertises the count prefix and 0/$ entries
+                and d["keysHasCount"] and d["keysHasEdge"]
+                and not d["badgeShown"]                   # no count left armed
+                and d["line"] == 1 and d["col"] == 0
+            )
+            if not ok:
+                fail("count_ok", False)
+                return
+            result["count_ok"] = True
+            _js(hub, _JS_KBD_COUNT_ARM, probe_count_arm)
+        except Exception:
+            fail("count_err", traceback.format_exc())
+
+    def probe_count_arm(payload):
+        try:
+            d = json.loads(payload)
+            result["count_arm"] = d
+            ok = (
+                d["badge"] == "3" and d["shown"]
+                and d["col"] == 0 and d["line"] == 1
+            )
+            if not ok:
+                fail("count_arm_ok", False)
+                return
+            result["count_arm_ok"] = True
+            # the page's own 1 s expiry timer must fire within this gap
+            after_delay(1500, lambda: _js(hub, _JS_KBD_COUNT_EXPIRE,
+                                          probe_count_expire))
+        except Exception:
+            fail("count_arm_err", traceback.format_exc())
+
+    def probe_count_expire(payload):
+        try:
+            d = json.loads(payload)
+            result["count_expire"] = d
+            ok = (
+                d["expired"]                               # badge gone
+                and d["colBefore"] == 0                    # ...expiry moved nothing
+                and d["colAfter"] == d["colBefore"] + 1    # next w: ONE word
+                and d["badge"] == ""                       # ...not three
+            )
+            if not ok:
+                fail("count_expire_ok", False)
+                return
+            result["count_expire_ok"] = True
+            # resume the original chain: V selects the cursor line
             hub.web.page().runJavaScript(_keys_js(["V"]))
             after_delay(700, lambda: _js(hub, _JS_KBD_SEL, probe_visual))
         except Exception:
-            fail("practice_err", traceback.format_exc())
+            fail("count_expire_err", traceback.format_exc())
 
     # -- Stage 3: V selects the whole cursor line into Python -----------
 

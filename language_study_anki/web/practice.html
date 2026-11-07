@@ -43,6 +43,13 @@ body { font-family: sans-serif; margin: 0; background: #fafafa; color: #222; }
   cursor: pointer; padding: 2px 9px; font-size: 14px; line-height: 1.3; }
 #toolbar #back:hover { background: #ececec; }
 #toolbar .field { color: #888; font-size: 12px; }
+/* Pending count prefix badge (spec: practice-dialog -> Line cursor and
+   keyboard movement): visible only while a digit prefix awaits its
+   motion, cleared ~1 s after the last digit or by any other key. */
+#toolbar #cnt { border: 1px solid #ccc; background: #f7f7f7;
+  border-radius: 3px; padding: 1px 5px; font-size: 11px; font-weight: bold;
+  color: #333; }
+#toolbar #cnt[hidden] { display: none; }
 .line { display: flex; gap: 10px; padding: 7px 14px; align-items: flex-start;
   border-bottom: 1px solid #f0f0f0; }
 /* Learned rows: dark gray band with light text instead of reduced opacity.
@@ -127,6 +134,7 @@ body.mode-writing .line.open .secondary.source { display: block; }
   <button id="back" title="Back to article list">&#8592;</button>
   <strong id="mode-name">__MODE__</strong>
   <span class="field" id="pf"></span>
+  <span id="cnt" class="field" hidden></span>
   <span class="hint">select &amp; press <kbd>a</kbd> · <kbd>V</kbd> then <kbd>a</kbd> whole line · <kbd>?</kbd> keys</span>
 </div>
 <div id="app"></div>
@@ -136,6 +144,7 @@ body.mode-writing .line.open .secondary.source { display: block; }
     <kbd>j</kbd>/<kbd>k</kbd> line · <kbd>gg</kbd>/<kbd>G</kbd> first/last<br>
     <kbd>PgUp</kbd>/<kbd>PgDn</kbd> one screen<br>
     <kbd>h</kbd>/<kbd>l</kbd> char · <kbd>w</kbd>/<kbd>b</kbd>/<kbd>e</kbd> word<br>
+    <kbd>3</kbd><kbd>w</kbd> count · <kbd>0</kbd>/<kbd>$</kbd> line start/end<br>
     <kbd>v</kbd> select from cursor · <kbd>V</kbd> whole line<br>
     <kbd>v</kbd> again cancels · <kbd>a</kbd> extracts &amp; clears
   </div><div>
@@ -331,6 +340,29 @@ let cur = Math.max(1, Math.min((D.progress || 0) + 1,
 let col = 0;        /* char offset within the cursor line (0..len) */
 let visual = null;  /* {anchor} while a v/V selection is active (one line) */
 let gPending = false;   /* pending `g` for the gg chord */
+/* Pending count prefix for the in-line motions (spec: practice-dialog ->
+   Line cursor and keyboard movement): digits accumulate here, the toolbar
+   badge shows it, and it auto-expires ~1 s after the last digit so a stray
+   digit never causes a surprise jump. Script scope, beside gPending: the
+   keydown listener below closes over it, and a `let` inside the
+   empty-article block would not be visible to it. */
+let countPending = 0;
+let countTimer = 0;
+const cntEl = document.getElementById('cnt');
+function pushCount(d){
+  countPending = countPending * 10 + d;
+  if (cntEl) {
+    cntEl.textContent = String(countPending);
+    cntEl.hidden = false;
+  }
+  if (countTimer) clearTimeout(countTimer);
+  countTimer = setTimeout(clearCount, 1000);   /* ~1 s idle expiry */
+}
+function clearCount(){
+  countPending = 0;
+  if (countTimer) { clearTimeout(countTimer); countTimer = 0; }
+  if (cntEl) { cntEl.hidden = true; cntEl.textContent = ''; }
+}
 let caretLive = false;  /* the caret appears on first key use only — the
                            self-test's mouse probes build a Range from
                            .sel-area's firstChild and expect pristine
@@ -531,12 +563,22 @@ if (D.lines.length > 0) {
     if (visual) extendVisual();
     render();
   }
-  function moveWord(kind){
+  function moveWord(kind, n){
     const t = selText(cur);
     if (!t.length) return;
-    col = kind === 'w' ? nextWordStart(t, col)
-        : kind === 'b' ? wordBack(t, col)
-        : wordEnd(t, col);
+    n = n || 1;
+    /* Repeat the primitive n times with a stagnation guard: at a line
+       boundary it returns the column it was given (w at line end, b at
+       column 0, e on the last char), so one no-op step ends the loop —
+       a count stops at the boundary and never leaves the line (spec:
+       Count never leaves the line). Worst case n steps, each O(line). */
+    for (let i = 0; i < n; i++) {
+      const next = kind === 'w' ? nextWordStart(t, col)
+                 : kind === 'b' ? wordBack(t, col)
+                 : wordEnd(t, col);
+      if (next === col) break;
+      col = next;
+    }
     if (visual) extendVisual();
     render();
   }
@@ -577,8 +619,18 @@ if (D.lines.length > 0) {
    line-dependent branches bail at a `D.lines.length === 0` guard
    before any block-scoped cursor state is touched. */
 document.addEventListener('keydown', function(e){
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key;
+  /* count discard (spec: Line cursor and keyboard movement): every key
+     that is neither a digit nor an in-line motion (h/l/w/b/e) drops a
+     pending count FIRST, then behaves exactly as it does without one —
+     a stale prefix can never turn a later key into a surprise jump;
+     the ~1 s expiry is only the backstop. Runs before every branch
+     (a, ?, PageUp, q, overlay-open) so no path can forget it. */
+  if (countPending > 0 && !/^[0-9]$/.test(k) &&
+      k !== 'h' && k !== 'l' && k !== 'w' && k !== 'b' && k !== 'e') {
+    clearCount();
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   /* bare `a` extract shortcut (no modifiers) — unchanged */
   if ((k === 'a' || k === 'A') && !e.shiftKey) {
     e.preventDefault();
@@ -615,6 +667,17 @@ document.addEventListener('keydown', function(e){
   if (k === 'q') { e.preventDefault(); pycmd('lsa:back'); return; }
   if (D.lines.length === 0) return;
   caretLive = true;
+  /* count prefix intake (spec: Line cursor and keyboard movement):
+     1-9 start/extend the count, 0 extends only while one is pending
+     (10l); a bare 0 falls through to the line-start motion below.
+     After the overlay guard (digits are inert while help is open) and
+     the empty-article guard (no badge churn on an empty article). */
+  if (/^[1-9]$/.test(k) || (k === '0' && countPending > 0)) {
+    e.preventDefault();
+    gPending = false;   /* a digit abandons a pending gg chord */
+    pushCount(+k);
+    return;
+  }
   /* Anki-reviewer parity: Space shows/hides the answer, r replays audio —
      the keys the user's muscle memory already owns. `Enter` and `p` are
      DELIBERATELY UNBOUND (spec: practice-dialog -> Keyboard line reveal
@@ -674,14 +737,28 @@ document.addEventListener('keydown', function(e){
     return;
   }
   gPending = false;
+  /* line-edge motions (spec: Line cursor and keyboard movement):
+     absolute positions, no count (a pending one was already discarded
+     at the top); through moveCol so the visual extension and render
+     ride along (design D3). Bare 0 only reaches here with no count
+     pending — the intake above returns for 0-while-counting. */
+  if (k === '0' || k === '$') {
+    e.preventDefault();
+    moveCol(k === '0' ? -col : selText(cur).length - col);
+    return;
+  }
   if (k === 'h' || k === 'l') {
     e.preventDefault();
-    moveCol(k === 'h' ? -1 : 1);
+    const n = countPending || 1;
+    clearCount();
+    moveCol(k === 'h' ? -n : n);
     return;
   }
   if (k === 'w' || k === 'b' || k === 'e') {
     e.preventDefault();
-    moveWord(k);
+    const n = countPending || 1;
+    clearCount();
+    moveWord(k, n);
     return;
   }
 });
