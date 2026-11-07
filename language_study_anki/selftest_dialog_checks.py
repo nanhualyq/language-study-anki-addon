@@ -1264,8 +1264,9 @@ def check_keyboard_nav(mw, report, done) -> None:
     row/skill cursor (column preservation, wrapping, direct digit) ->
     Enter into practice -> V visual selection reaching Python -> Esc
     cancel probe (design risk item: does Esc reach the page?) -> V+a
-    extract through the unchanged pipeline -> Enter reveal -> q back with
-    the refreshed percentage and no keypress progress writes.
+    extract through the unchanged pipeline -> Enter probed as UNBOUND ->
+    Space reveal -> q back with the refreshed percentage and no keypress
+    progress writes.
     """
     from . import hub as hub_mod
     from .practice_dialog import MODES
@@ -1505,11 +1506,27 @@ def check_keyboard_nav(mw, report, done) -> None:
         else:
             after_extract()
 
-    # -- Stage 5: Enter reveal on the next line -------------------------
+    # -- Stage 5: Space reveal on the next line (Enter is unbound) ------
 
     def after_extract():
+        # Anki-parity keys (spec: Keyboard line reveal and playback):
+        # `Enter` no longer toggles reveal — probe the negative first,
+        # then reveal the very same line with `Space`.
         hub.web.page().runJavaScript(_keys_js(["j", "Enter"]))
-        after_delay(700, lambda: _js(hub, _JS_KBD_REVEAL, probe_reveal))
+        after_delay(700, lambda: _js(hub, _JS_KBD_REVEAL, probe_enter_noop))
+
+    def probe_enter_noop(payload):
+        try:
+            d = json.loads(payload)
+            result["reveal_enter_noop"] = d
+            if d["open"]:
+                fail("enter_unbound_ok", False)
+                return
+            result["enter_unbound_ok"] = True
+            hub.web.page().runJavaScript(_keys_js([" "]))
+            after_delay(700, lambda: _js(hub, _JS_KBD_REVEAL, probe_reveal))
+        except Exception:
+            fail("reveal_err", traceback.format_exc())
 
     def probe_reveal(payload):
         try:
@@ -1576,6 +1593,100 @@ def src_fallback(note) -> str:
     return lines[0] if lines else ""
 
 
+def check_reveal_playback_keys(mw, report, done) -> None:
+    """practice-dialog -> Keyboard line reveal and playback (Anki parity).
+
+    In Listening mode with the cursor line closed: `Space` toggles reveal
+    exactly like the twisty, `r` posts `lsa:play:<n>`, and the legacy
+    `Enter`/`p` keys are UNBOUND (Enter leaves the line closed, p starts
+    no playback). Reveal and playback write no progress.
+    """
+    from . import hub as hub_mod
+    from .practice_dialog import MODES, open_dialog
+
+    col = mw.col
+    art = _ensure_long_article(col)
+    for s in MODES:
+        _set_progress_raw(col, art, s, 0)
+    before = {s: get_progress(col.get_note(art), s) for s in MODES}
+
+    # A leftover Hub from an earlier check would mask ours (singleton).
+    if hub_mod._hub is not None:
+        try:
+            hub_mod._hub.close()
+        except Exception:
+            pass
+
+    dlg = open_dialog(None, art, "listening")
+    result = report["detail"] = {"progress_before": before}
+
+    _JS_KBD_OPEN = (
+        "var r=document.querySelector('.line.kcursor');"
+        "JSON.stringify({open:!!(r&&r.classList.contains('open'))})"
+    )
+
+    def finish(ok: bool) -> None:
+        after = {s: get_progress(col.get_note(art), s) for s in MODES}
+        result["progress_after"] = after
+        report["ok"] = bool(ok) and after == before
+        try:
+            dlg.close()
+        except Exception:
+            pass
+        done()
+
+    def fire(keys, next_fn):
+        _js(dlg, _keys_js(keys), lambda _p: after_delay(700, next_fn))
+
+    def open_probe(name, expect, cont):
+        def got(payload):
+            try:
+                d = json.loads(payload)
+            except Exception:
+                result[name] = payload
+                finish(False)
+                return
+            result[name] = d
+            if bool(d.get("open")) != expect:
+                finish(False)
+                return
+            cont()
+
+        _js(dlg, _JS_KBD_OPEN, got)
+
+    def play_probe(name, expect, cont):
+        plays = [
+            e for e in getattr(dlg, "bridge_log", [])
+            if e.startswith("lsa:play:")
+        ]
+        result[name] = plays
+        if bool(plays) != expect:
+            finish(False)
+            return
+        cont()
+
+    # Order matters: `p` is probed BEFORE `r`, so the play log is still
+    # empty when the unbound key is pressed (bridge_log persists across
+    # stages and is capped at 8 entries).
+    def stage_enter():
+        fire(["Enter"], lambda: open_probe("enter_noop", False, stage_p))
+
+    def stage_p():
+        fire(["p"], lambda: play_probe("p_noop", False, stage_r))
+
+    def stage_r():
+        fire(["r"], lambda: play_probe("r_play", True, stage_open))
+
+    def stage_open():
+        fire([" "], lambda: open_probe("space_reveals", True, stage_close))
+
+    def stage_close():
+        fire([" "], lambda: open_probe(
+            "space_hides", False, lambda: finish(True)))
+
+    after_delay(1400, stage_enter)
+
+
 CHECKS_EXTRA = [
     ("hub_list", check_hub_list),
     ("dialog_modes", check_dialog_modes),
@@ -1585,4 +1696,5 @@ CHECKS_EXTRA = [
     ("extract_all_modes", check_extract_all_modes),
     ("learned_style", check_learned_style),
     ("keyboard_nav", check_keyboard_nav),
+    ("reveal_playback_keys", check_reveal_playback_keys),
 ]

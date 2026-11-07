@@ -21,9 +21,11 @@
     selection and extract / Keyboard line reveal and playback / Keyboard
     return and keymap help): a page-local vim-style cursor — j/k/gg/G line
     cursor, h/l/w/b/e char cursor, v/V visual selection realized as a DOM
-    selection so the lsa:sel pipeline serves it unchanged, Enter reveal,
-    p/Space TTS play, second `v` cancels the selection (Escape is
-    deliberately UNBOUND — Anki injects its own Escape -> pycmd("close")
+    selection so the lsa:sel pipeline serves it unchanged, Space reveal,
+    r TTS play (Anki-reviewer parity: Enter and p are UNBOUND — one key
+    per action, no extra memory burden), second `v` cancels the selection
+    (Escape is deliberately UNBOUND — Anki injects its own Escape ->
+    pycmd("close")
     -> onEsc handler that closes the Hub window and cannot be blocked
     from page script; see design D11), q back, ? keymap overlay. Adds no
     bridge commands; the bare `a` extract shortcut is unchanged.
@@ -134,7 +136,7 @@ body.mode-writing .line.open .secondary.source { display: block; }
     <kbd>v</kbd> select from cursor · <kbd>V</kbd> whole line<br>
     <kbd>v</kbd> again cancels · <kbd>a</kbd> extracts &amp; clears
   </div><div>
-    <kbd>Enter</kbd> reveal · <kbd>p</kbd>/<kbd>Space</kbd> play<br>
+    <kbd>Space</kbd> show/hide · <kbd>r</kbd> replay audio<br>
     <kbd>q</kbd> back to list · <kbd>?</kbd> close this help
   </div></div>
 </div>
@@ -547,10 +549,15 @@ document.addEventListener('keydown', function(e){
   if (k === 'q') { e.preventDefault(); pycmd('lsa:back'); return; }
   if (D.lines.length === 0) return;
   caretLive = true;
-  if (k === 'Enter') { e.preventDefault(); toggleReveal(); return; }
-  if (k === 'p' || k === ' ') {
-    /* consumed even where playback does not apply (reading/writing) so
-       Space never scrolls the page out from under the cursor */
+  /* Anki-reviewer parity: Space shows/hides the answer, r replays audio —
+     the keys the user's muscle memory already owns. `Enter` and `p` are
+     DELIBERATELY UNBOUND (spec: practice-dialog -> Keyboard line reveal
+     and playback): one key per action, so the keymap carries no extra
+     memory burden. Space is consumed in every mode — reveal applies
+     everywhere, and it must never scroll the page out from under the
+     cursor. */
+  if (k === ' ' || k === 'Space') { e.preventDefault(); toggleReveal(); return; }
+  if (k === 'r' || k === 'R') {
     e.preventDefault();
     if (D.mode === 'listening' || D.mode === 'speaking') {
       pycmd('lsa:play:' + cur);

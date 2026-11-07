@@ -83,7 +83,7 @@ Note: launch Anki with `ANKI_SINGLE_INSTANCE_KEY` set (the script does this) —
 otherwise a running production Anki swallows the launch with
 "Already running; reusing existing instance."
 
-### Self-test suite (10 checks, runs inside the addon)
+### Self-test suite (17 checks, runs inside the addon)
 
 ```bash
 LSA_SELFTEST=1 LSA_SELFTEST_KEEP=1 tools/scratch-anki.sh
@@ -93,9 +93,10 @@ LSA_SELFTEST=1 LSA_SELFTEST_KEEP=1 tools/scratch-anki.sh
 Covers provisioning/adoption, card suspension, Add-dialog `set_note`,
 database hygiene, Hub list rows/percentages/navigation, mode rendering,
 scroll restore,
-selection capture, TTS, and four-mode extraction (note types, field kinds,
-progress writes). `LSA_SELFTEST_KEEP=1` keeps Anki open afterwards for a
-manual pass.
+selection capture, TTS, keyboard navigation plus the Anki-parity
+reveal (`Space`) / replay (`r`) keys, and four-mode extraction (note types,
+field kinds, progress writes). `LSA_SELFTEST_KEEP=1` keeps Anki open
+afterwards for a manual pass.
 
 ### Unit tests (zero dependencies)
 

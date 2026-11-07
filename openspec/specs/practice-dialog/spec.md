@@ -195,15 +195,19 @@ The system SHALL support selecting text without the mouse. `v` starts a characte
 - **THEN** that line reveals its source text and the whole line becomes the active selection
 
 ### Requirement: Keyboard line reveal and playback
-The system SHALL operate per-line reveal and TTS playback from the keyboard. `Enter` toggles the focused line's hidden content with the same effect as activating that line's toggle control, in every mode. `p` and `Space` play the focused line's text through the TTS engine in Listening and Speaking modes with the same effect as activating that line's play button; in Reading and Writing modes they have no effect. Reveal and playback keys SHALL write no progress.
+The system SHALL operate per-line reveal and TTS playback from the keyboard with Anki-reviewer parity, so the practice keys carry no extra memory burden. `Space` toggles the focused line's hidden content with the same effect as activating that line's toggle control, in every mode. `r` plays the focused line's text through the TTS engine in Listening and Speaking modes with the same effect as activating that line's play button, and has no effect in Reading and Writing modes. No other key SHALL toggle reveal or start playback — in particular `Enter` and `p` SHALL have no effect on reveal or playback. Reveal and playback keys SHALL write no progress.
 
 #### Scenario: Keyboard reveal matches the toggle control
-- **WHEN** the user focuses a closed line in Reading mode and presses `Enter`
+- **WHEN** the user focuses a closed line in Reading mode and presses `Space`
 - **THEN** that line shows its translation exactly as if its toggle control had been clicked, and other lines are unchanged
 
 #### Scenario: Keyboard playback in Listening mode
-- **WHEN** the user focuses a line in Listening mode and presses `p`
+- **WHEN** the user focuses a line in Listening mode and presses `r`
 - **THEN** that line's text is spoken by the TTS engine, interrupting any playback in progress, as with the line's play button
+
+#### Scenario: Legacy keys are unbound
+- **WHEN** the user focuses a closed line in Listening mode and presses `Enter`, then presses `p`
+- **THEN** the line stays closed, no TTS playback starts, and no progress is written
 
 ### Requirement: Keyboard return and keymap help
 The system SHALL provide keyboard shortcuts for returning to the list and for discovering the keymap. `q` returns to the article-list page with the same effect as the back control, writing no progress. `?` toggles a keymap overlay listing the practice page's shortcuts; the overlay SHALL not change lines, reveal state, selection, or progress, and pressing `?` again hides it. `Escape` SHALL NOT be bound by the page: Anki injects its own page-level Escape handler (bridge command `close` → `AnkiWebView.onEsc`) that closes the Hub window and cannot be blocked from page script, so every page action must be operable without Escape. The toolbar hint SHALL advertise the keyboard layer.
