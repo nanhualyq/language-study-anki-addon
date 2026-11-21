@@ -24,6 +24,7 @@ def build_front(
     timestamp_ms: int | None = None,
     mark_prefix: str = "",
     mark_suffix: str = "",
+    context_source: list[str] | None = None,
 ) -> str:
     """Build the Front field for a selection on ``line_number`` (1-based).
 
@@ -33,6 +34,13 @@ def build_front(
     ``mark_suffix`` inside the mark (speaking's 🎤 cue; empty by default) +
     a hidden timestamp span keeping the field
     content unique (defeats duplicate detection).
+
+    ``context_source`` supplies the context lines above the selected line
+    when they come from a different text than the selected line (Writing:
+    source-line context above the translation line); ``None`` (default)
+    reads the context from ``lines`` itself. Context indices are clamped to
+    ``context_source``'s length, so a shorter list yields fewer context
+    lines instead of an error.
     """
     if not 1 <= line_number <= len(lines):
         raise IndexError(f"line {line_number} out of range ({len(lines)} lines)")
@@ -41,10 +49,11 @@ def build_front(
         raise IndexError("selection offsets out of line bounds")
 
     current = line_number - 1
+    context = lines if context_source is None else context_source
     context_start = max(0, current - CONTEXT_LINES)
     parts = [
-        html.escape(lines[i], quote=False) + "<br>"
-        for i in range(context_start, current)
+        html.escape(context[i], quote=False) + "<br>"
+        for i in range(context_start, min(current, len(context)))
     ]
 
     selected = line[start:end] if not highlight_replacement else highlight_replacement

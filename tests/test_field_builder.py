@@ -90,6 +90,63 @@ class BuildFrontTests(unittest.TestCase):
             build_front(["abc"], 1, 2, 99, timestamp_ms=1)
 
 
+class ContextSourceTests(unittest.TestCase):
+    """Writing-style fronts: source context above the marked translation line
+    (spec: practice-extract → Writing front context comes from source lines)."""
+
+    @staticmethod
+    def _texts(n=10):
+        return [f"src {i + 1}" for i in range(n)], [f"tr {i + 1}" for i in range(n)]
+
+    def test_mid_article_context_comes_from_source_lines(self):
+        src, tr = self._texts()
+        front = build_front(tr, 7, 0, 4, timestamp_ms=1, context_source=src)
+        # Context: source lines 4-6 <br>-terminated, then marked translation line 7.
+        self.assertIn("src 4<br>src 5<br>src 6<br>", front)
+        self.assertIn("<mark>tr 7</mark>", front)
+        self.assertNotIn("tr 4", front)  # no translation context lines
+        self.assertNotIn("src 3<br>", front)
+        self.assertNotIn("src 7", front)
+
+    def test_near_top_context_clamps_to_first_source_line(self):
+        src, tr = self._texts()
+        front = build_front(tr, 2, 0, 4, timestamp_ms=1, context_source=src)
+        self.assertIn("src 1<br>", front)
+        self.assertNotIn("src 0", front)
+        self.assertIn("<mark>tr 2</mark>", front)
+
+    def test_first_line_has_no_context_even_with_context_source(self):
+        src, tr = self._texts()
+        front = build_front(tr, 1, 0, 4, timestamp_ms=1, context_source=src)
+        self.assertNotIn("src ", front)
+        self.assertIn("<mark>tr 1</mark>", front)
+        self.assertTrue(front.endswith('<span style="display:none">1</span>'))
+
+    def test_context_source_lines_escaped(self):
+        src = ["a < b", "plain", "target"]
+        tr = ["译 1", "译 2", "译 3"]
+        front = build_front(tr, 3, 0, 3, timestamp_ms=1, context_source=src)
+        self.assertIn("a &lt; b<br>plain<br>", front)
+        self.assertIn("<mark>译 3</mark>", front)
+
+    def test_shorter_context_source_yields_fewer_context_lines(self):
+        src, _ = self._texts(5)  # source shorter than the translation index
+        _, tr = self._texts(10)
+        front = build_front(tr, 7, 0, 4, timestamp_ms=1, context_source=src)
+        self.assertIn("src 4<br>src 5<br>", front)  # clamped to available lines
+        self.assertNotIn("src 3<br>", front)
+        self.assertNotIn("src 6", front)
+        self.assertIn("<mark>tr 7</mark>", front)
+
+    def test_none_context_source_reproduces_default_output(self):
+        texts = lines(10)
+        default = build_front(texts, 7, 0, 4, timestamp_ms=1)
+        explicit = build_front(texts, 7, 0, 4, timestamp_ms=1, context_source=None)
+        self.assertEqual(default, explicit)
+        # Default still reads the context from the selected line's own list.
+        self.assertIn("line 4<br>line 5<br>line 6<br>", default)
+
+
 class BackResolutionTests(unittest.TestCase):
     def test_dictionary_entries_win(self):
         entries = [DictEntry(pos="adj.", tran="短暂的")]

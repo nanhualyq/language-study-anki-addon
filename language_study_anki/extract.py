@@ -3,7 +3,7 @@
 Ports the reference app's per-mode extract behavior without AnkiConnect:
 
   reading   LSA-ReadWrite  Front=source ctx + <mark>   Back=youdao/translation
-  writing   LSA-ReadWrite  Front=TRANSLATION ctx+<mark> Back=source line (no lookup)
+  writing   LSA-ReadWrite  Front=source ctx + TRANSLATION<mark> Back=source line (no lookup)
   listening LSA-Listen     Front=source ctx, sel→???    Back=selected  Phone=phonetics
   speaking  LSA-Speak      Front=source ctx + <mark>    Back=selected  Phone=phonetics
 
@@ -137,7 +137,7 @@ def _open_add_dialog(dialog, sel: dict, result) -> None:
     if mode == "writing" and translations:
         if not 1 <= line_no <= len(translations):
             raise ValueError(f"translation line {line_no} out of range")
-        front = build_front(translations, line_no, start, end)
+        front = build_front(translations, line_no, start, end, context_source=lines)
         back = lines[line_no - 1] if 1 <= line_no <= len(lines) else ""
         kinds = "front:translation back:source-line highlight:mark"
     else:
