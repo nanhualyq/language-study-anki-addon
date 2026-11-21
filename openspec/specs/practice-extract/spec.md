@@ -26,9 +26,9 @@ The system SHALL provide a bare `a` key shortcut in the practice dialog that sen
 - **THEN** extraction is not triggered: no Add dialog opens and no note is constructed
 
 ### Requirement: Prefilled note content
-For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior, plus the Speaking mic decoration):
+For an extracted selection, the system SHALL construct a note targeting deck `English` with per-mode field content (port of the reference app's behavior, plus the Speaking mic decoration; Writing's context lines come from the source text):
 - **Reading** → note type `LSA-ReadWrite`: `Front` = source context (up to 3 lines above, `<br>`-terminated) with the selection wrapped in `<mark>` + hidden timestamp; `Back` = Youdao dictionary definition, falling back to the translation line at the selected index, else empty.
-- **Writing** → note type `LSA-ReadWrite`: selection is made on the **translation** text; `Front` = translation-line context with the selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
+- **Writing** → note type `LSA-ReadWrite`: selection is made on the **translation** text; `Front` = **source-line context** (up to 3 source lines above the same index, `<br>`-terminated) with the **current line unchanged — the translation line**, its selection wrapped in `<mark>` + hidden timestamp; `Back` = the **source line at the same index** (empty when absent). No dictionary lookup.
 - **Listening** → note type `LSA-Listen`: `Front` = source context with the selection **replaced by `???`** + hidden timestamp; `Back` = the **selected text itself**; `Phone` = Youdao phonetics with **one phonetic per line**, `<br>`-separated (i.e. `UK /…/<br>US /…/`; empty on lookup failure).
 - **Speaking** → note type `LSA-Speak`: `Front` = source context with the selection wrapped in `<mark>` **with 🎤 as prefix and suffix of the selected text inside the mark** (i.e. `<mark>🎤selected🎤</mark>`) + hidden timestamp; `Back` = the **selected text itself, undecorated** (no 🎤); `Phone` = Youdao phonetics per-line as above.
 - All types also carry `Title` (article title), `Url` (article URL or empty), and `Cover` (the source article's `Cover` value, or empty when the article carries no `Cover` value). Audio types additionally carry `Phone`.
@@ -64,8 +64,12 @@ All inter-line separators in field values SHALL be `<br>` tags, never raw newlin
 
 #### Scenario: Writing extracts the translation
 - **WHEN** the user selects text on a translation line in Writing mode and extracts
-- **THEN** `Front` is built from the **translation** lines with the selection wrapped in `<mark>`, and `Back` contains the source line at the same index
+- **THEN** `Front`'s current line is the **translation** line with the selection wrapped in `<mark>`, `Front`'s context lines are the **source** lines above the same index, and `Back` contains the source line at the same index
 - **AND** no dictionary lookup is performed
+
+#### Scenario: Writing front context comes from the source lines
+- **WHEN** the user extracts on line 7 in Writing mode from an article that has both source and translation lines
+- **THEN** `Front` contains source lines 4, 5, and 6 (each `<br>`-terminated) above the marked translation line 7, and contains no translation context lines
 
 #### Scenario: Selection on the first line
 - **WHEN** the user extracts a selection on line 1
